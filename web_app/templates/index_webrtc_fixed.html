@@ -857,21 +857,39 @@
             if (result.status === 'ok') {
                 showToast(result.message, 'success');
                 
-                // テーブル表示中ならallPositions配列を直接更新（高速）
+                // デバッグログ
+                console.log('=== Save Debug ===');
+                console.log('position:', position);
+                console.log('data:', data);
+                console.log('allPositions.length:', allPositions.length);
+                console.log('isTableView:', isTableView);
+                
+                // allPositions配列が存在すれば常に更新（表示モードに関わらず）
                 if (allPositions.length > 0) {
                     const index = allPositions.findIndex(pos => pos.position === position);
+                    console.log('Found index:', index);
                     if (index !== -1) {
                         // 保存したデータをそのまま反映
+                        console.log('Before update:', allPositions[index]);
                         allPositions[index] = { 
                             position: position, 
                             ...data 
                         };
-                        // テーブル表示中なら再描画
+                        console.log('After update:', allPositions[index]);
+                        console.log('allPositions updated successfully');
+                        
+                        // テーブル表示中なら即座に再描画
                         if (isTableView) {
+                            console.log('Table view is active - calling displayPositionTable()');
                             displayPositionTable();
-                            console.log(`Position ${position} updated in table (direct update)`);
+                        } else {
+                            console.log('Table view is NOT active - data updated but not displayed');
                         }
+                    } else {
+                        console.log('ERROR: Position not found in allPositions array');
                     }
+                } else {
+                    console.log('WARNING: allPositions is empty - please load data first');
                 }
             } else {
                 showToast('保存失敗: ' + result.message, 'error');
