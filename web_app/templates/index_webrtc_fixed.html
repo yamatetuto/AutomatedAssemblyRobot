@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>自動組立ロボット制御 v2.0</title>
+    <title>自動組立ロボット制御 v2.1</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
@@ -377,7 +377,7 @@
 </head>
 <body>
     <div class="header">
-        <h1>🤖 自動組立ロボット制御システム v2.0</h1>
+        <h1>🤖 自動組立ロボット制御システム v2.1</h1>
     </div>
     
     <div class="main-container">
@@ -857,9 +857,21 @@
             if (result.status === 'ok') {
                 showToast(result.message, 'success');
                 
-                // テーブル表示中なら該当ポジションのみ再取得して更新
-                if (isTableView && allPositions.length > 0) {
-                    await updateSinglePosition(position);
+                // テーブル表示中ならallPositions配列を直接更新（高速）
+                if (allPositions.length > 0) {
+                    const index = allPositions.findIndex(pos => pos.position === position);
+                    if (index !== -1) {
+                        // 保存したデータをそのまま反映
+                        allPositions[index] = { 
+                            position: position, 
+                            ...data 
+                        };
+                        // テーブル表示中なら再描画
+                        if (isTableView) {
+                            displayPositionTable();
+                            console.log(`Position ${position} updated in table (direct update)`);
+                        }
+                    }
                 }
             } else {
                 showToast('保存失敗: ' + result.message, 'error');
@@ -938,27 +950,6 @@
                     displayPositionTable();
                 };
                 pagination.appendChild(btn);
-            }
-        }
-        
-        // ポジションテーブル: 単一ポジションのデータを再取得して更新
-        async function updateSinglePosition(position) {
-            try {
-                const response = await fetch(`/api/gripper/position_table/${position}`);
-                const data = await response.json();
-                
-                if (data.status === 'ok') {
-                    // allPositions配列内の該当データを更新
-                    const index = allPositions.findIndex(pos => pos.position === position);
-                    if (index !== -1) {
-                        allPositions[index] = { position: position, ...data.data };
-                        // テーブルを再描画
-                        displayPositionTable();
-                        console.log(`Position ${position} updated in table`);
-                    }
-                }
-            } catch (e) {
-                console.error(`Position ${position} update error:`, e);
             }
         }
         
