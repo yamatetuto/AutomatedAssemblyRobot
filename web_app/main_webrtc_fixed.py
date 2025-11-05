@@ -709,7 +709,7 @@ async def gripper_status():
         return JSONResponse({"status": "error", "message": "グリッパー未接続"}, status_code=503)
     
     try:
-        position = gripper.instrument.read_register(gripper.REG_CURRENT_POS, functioncode=3)
+        position = gripper.instrument.read_long(gripper.REG_CURRENT_POS, functioncode=3, signed=True)
         alarm = gripper.instrument.read_register(gripper.REG_CURRENT_ALARM, functioncode=3)
         device_status = gripper.instrument.read_register(gripper.REG_DEVICE_STATUS, functioncode=3)
         servo_on = bool((device_status >> gripper.BIT_SERVO_READY) & 1)
