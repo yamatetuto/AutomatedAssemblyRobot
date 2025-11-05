@@ -926,17 +926,30 @@
         // ポジションテーブル: 表示切替
         function toggleTableView() {
             isTableView = !isTableView;
+            console.log('toggleTableView() - isTableView:', isTableView);
             document.getElementById('posTableList').style.display = isTableView ? 'block' : 'none';
             document.getElementById('posTableEdit').style.display = isTableView ? 'none' : 'block';
+            
+            // テーブル表示に切り替えた時、データがあれば再描画
+            if (isTableView && allPositions.length > 0) {
+                console.log('Switching to table view - redrawing table');
+                displayPositionTable();
+            }
         }
         
         // ポジションテーブル: ページ表示
         function displayPositionTable() {
+            console.log('=== displayPositionTable() called ===');
+            console.log('currentPage:', currentPage);
+            console.log('itemsPerPage:', itemsPerPage);
+            console.log('allPositions.length:', allPositions.length);
+            
             const tbody = document.getElementById('posTableBody');
             tbody.innerHTML = '';
             
             const start = currentPage * itemsPerPage;
             const end = Math.min(start + itemsPerPage, allPositions.length);
+            console.log('Displaying positions from', start, 'to', end-1);
             
             for (let i = start; i < end; i++) {
                 const pos = allPositions[i];
