@@ -411,4 +411,5 @@ sudo usermod -a -G dialout $USER
 | 日付 | バージョン | 内容 | 作成者 |
 |------|-----------|------|--------|
 | 2025-11-05 | 1.0 | 初版作成 | GitHub Copilot |
+| 2025-11-05 | 1.1 | aiortc/aiohttp未インストール状態を明記 | GitHub Copilot |
 
