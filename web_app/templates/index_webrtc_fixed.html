@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>自動組立ロボット制御 v1.4</title>
+    <title>自動組立ロボット制御 v1.6</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
@@ -212,21 +212,47 @@
             min-width: 100px;
         }
         
+        .gripper-status-fixed {
+            position: fixed;
+            bottom: 30px;
+            right: 30px;
+            background: #27ae60;
+            color: #fff;
+            padding: 12px 18px;
+            border-radius: 8px;
+            box-shadow: 0 4px 15px rgba(39, 174, 96, 0.4);
+            z-index: 9999;
+            font-size: 0.95em;
+            font-weight: 500;
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+            min-width: 200px;
+        }
+        .gripper-status-fixed .status-label {
+            font-size: 0.85em;
+            opacity: 0.9;
+            border-bottom: 1px solid rgba(255,255,255,0.3);
+            padding-bottom: 4px;
+            margin-bottom: 2px;
+        }
+        
         .toast {
             position: fixed;
-            bottom: 20px;
-            right: 20px;
+            bottom: 140px;
+            right: 30px;
             background: #16213e;
             color: #00d4ff;
-            padding: 12px 18px;
-            border-radius: 5px;
+            padding: 15px 20px;
+            border-radius: 8px;
             border: 2px solid #00d4ff;
             box-shadow: 0 4px 20px rgba(0, 212, 255, 0.5);
             opacity: 0;
             transition: opacity 0.3s;
             z-index: 10000;
-            max-width: 350px;
-            font-size: 0.9em;
+            max-width: 400px;
+            font-size: 1em;
+            font-weight: 500;
         }
         .toast.show { opacity: 1; }
         .toast.error {
@@ -345,7 +371,7 @@
 </head>
 <body>
     <div class="header">
-        <h1>🤖 自動組立ロボット制御システム v1.4</h1>
+        <h1>🤖 自動組立ロボット制御システム v1.6</h1>
     </div>
     
     <div class="main-container">
@@ -401,10 +427,6 @@
                     <span class="toggle-icon collapsed" id="gripper-toggle">▼</span>
                 </div>
                 <div class="panel-body collapsed" id="gripper-body">
-                    <div class="status connected" style="margin-bottom: 10px;">
-                        <span id="gripperStatus">位置: --mm | サーボ: --</span>
-                    </div>
-                    
                     <div class="button-row" style="margin-bottom: 10px;">
                         <button onclick="gripperServo('on')">⚡ サーボON</button>
                         <button onclick="gripperServo('off')">⭕ サーボOFF</button>
@@ -493,6 +515,12 @@
         </div>
     </div>
     
+    <!-- 固定グリッパーステータス表示 -->
+    <div id="gripperStatusFixed" class="gripper-status-fixed">
+        <div class="status-label">🤏 グリッパー</div>
+        <span id="gripperStatus">位置: --mm | サーボ: --</span>
+    </div>
+    
     <div id="toast" class="toast"></div>
     
     <script>
@@ -507,7 +535,7 @@
             const toast = document.getElementById('toast');
             toast.textContent = message;
             toast.className = 'toast show ' + type;
-            setTimeout(() => toast.classList.remove('show'), 3000);
+            setTimeout(() => toast.classList.remove('show'), 5000);
         }
         
         function togglePanel(panelId) {
