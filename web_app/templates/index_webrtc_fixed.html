@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>自動組立ロボット制御</title>
+    <title>自動組立ロボット制御 v1.2</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
@@ -96,11 +96,12 @@
             position: relative;
             display: flex;
             flex-direction: column;
+            min-height: 0;
         }
         
         #videoElement {
             width: 100%;
-            flex: 1;
+            height: 100%;
             object-fit: contain;
             background: #000;
         }
@@ -121,23 +122,26 @@
         .status.disconnected { background: #e74c3c; color: #fff; }
         
         .video-controls {
-            padding: 10px;
+            padding: 12px;
             background: #0f3460;
             display: flex;
-            gap: 8px;
+            gap: 10px;
             flex-wrap: wrap;
             align-items: center;
-            position: relative;
-            z-index: 5;
             border-top: 2px solid #00d4ff;
+            z-index: 100;
+            position: relative;
         }
         .video-controls button {
             flex: 0 0 auto;
-            padding: 8px 15px;
+            padding: 10px 18px;
+            font-size: 1em;
         }
         .video-controls select {
-            flex: 1;
-            min-width: 140px;
+            flex: 1 1 150px;
+            min-width: 150px;
+            padding: 10px;
+            font-size: 0.95em;
         }
         
         .controls {
@@ -274,7 +278,7 @@
         .postable-table {
             width: 100%;
             border-collapse: collapse;
-            font-size: 0.85em;
+            font-size: 0.8em;
         }
         .postable-table th {
             background: #0f3460;
@@ -332,7 +336,7 @@
 </head>
 <body>
     <div class="header">
-        <h1>🤖 自動組立ロボット制御システム</h1>
+        <h1>🤖 自動組立ロボット制御システム v1.2</h1>
     </div>
     
     <div class="main-container">
@@ -424,11 +428,9 @@
                                 <thead>
                                     <tr>
                                         <th>Pos</th>
-                                        <th>目標</th>
-                                        <th>位置速度</th>
-                                        <th>移動力</th>
-                                        <th>把持速度</th>
-                                        <th>把持力</th>
+                                        <th>位置<br>(mm)</th>
+                                        <th>幅<br>(mm)</th>
+                                        <th>速度<br>(mm/s)</th>
                                     </tr>
                                 </thead>
                                 <tbody id="posTableBody">
@@ -448,32 +450,28 @@
                         
                         <div id="posTableData" class="controls" style="display:none; margin-top: 10px;">
                             <div class="control-group">
-                                <label>目標位置:</label>
-                                <input type="number" id="pt_target" min="0" max="10000" value="0">
+                                <label>目標位置 (mm):</label>
+                                <input type="number" id="pt_position_mm" min="0" max="4" step="0.01" value="0">
                             </div>
                             <div class="control-group">
-                                <label>位置決め速度:</label>
-                                <input type="number" id="pt_pos_speed" min="0" max="100" value="50">
+                                <label>位置決め幅 (mm):</label>
+                                <input type="number" id="pt_width_mm" min="0" max="4" step="0.01" value="0.1">
                             </div>
                             <div class="control-group">
-                                <label>移動力:</label>
-                                <input type="number" id="pt_move_force" min="0" max="100" value="50">
+                                <label>速度 (mm/s):</label>
+                                <input type="number" id="pt_speed_mm_s" min="2" max="78" step="0.1" value="50">
                             </div>
                             <div class="control-group">
-                                <label>把持速度:</label>
-                                <input type="number" id="pt_grip_speed" min="0" max="100" value="50">
+                                <label>加速度 (G):</label>
+                                <input type="number" id="pt_accel_g" min="0.01" max="0.3" step="0.01" value="0.3">
                             </div>
                             <div class="control-group">
-                                <label>把持力:</label>
-                                <input type="number" id="pt_grip_force" min="0" max="100" value="50">
+                                <label>減速度 (G):</label>
+                                <input type="number" id="pt_decel_g" min="0.01" max="0.3" step="0.01" value="0.3">
                             </div>
                             <div class="control-group">
-                                <label>把持幅:</label>
-                                <input type="number" id="pt_grip_width" min="0" max="10000" value="0">
-                            </div>
-                            <div class="control-group">
-                                <label>エリア1:</label>
-                                <input type="number" id="pt_area1" min="0" max="10000" value="0">
+                                <label>押付け電流 (%):</label>
+                                <input type="number" id="pt_push_current" min="0" max="70" value="0">
                             </div>
                             <button onclick="savePositionTable()" style="width: 100%; margin-top: 5px;">💾 保存</button>
                         </div>
@@ -729,13 +727,12 @@
             const data = await response.json();
             
             if (data.status === 'ok') {
-                document.getElementById('pt_target').value = data.data.target_position || 0;
-                document.getElementById('pt_pos_speed').value = data.data.positioning_speed || 50;
-                document.getElementById('pt_move_force').value = data.data.moving_force || 50;
-                document.getElementById('pt_grip_speed').value = data.data.gripping_speed || 50;
-                document.getElementById('pt_grip_force').value = data.data.gripping_force || 50;
-                document.getElementById('pt_grip_width').value = data.data.gripping_width || 0;
-                document.getElementById('pt_area1').value = data.data.area_1 || 0;
+                document.getElementById('pt_position_mm').value = data.data.position_mm || 0;
+                document.getElementById('pt_width_mm').value = data.data.width_mm || 0.1;
+                document.getElementById('pt_speed_mm_s').value = data.data.speed_mm_s || 50;
+                document.getElementById('pt_accel_g').value = data.data.accel_g || 0.3;
+                document.getElementById('pt_decel_g').value = data.data.decel_g || 0.3;
+                document.getElementById('pt_push_current').value = data.data.push_current_percent || 0;
                 document.getElementById('posTableData').style.display = 'flex';
                 showToast(`ポジション${position}のデータを読み込みました`, 'success');
             } else {
@@ -747,13 +744,12 @@
         async function savePositionTable() {
             const position = document.getElementById('posTableSelect').value;
             const data = {
-                target_position: parseInt(document.getElementById('pt_target').value),
-                positioning_speed: parseInt(document.getElementById('pt_pos_speed').value),
-                moving_force: parseInt(document.getElementById('pt_move_force').value),
-                gripping_speed: parseInt(document.getElementById('pt_grip_speed').value),
-                gripping_force: parseInt(document.getElementById('pt_grip_force').value),
-                gripping_width: parseInt(document.getElementById('pt_grip_width').value),
-                area_1: parseInt(document.getElementById('pt_area1').value)
+                position_mm: parseFloat(document.getElementById('pt_position_mm').value),
+                width_mm: parseFloat(document.getElementById('pt_width_mm').value),
+                speed_mm_s: parseFloat(document.getElementById('pt_speed_mm_s').value),
+                accel_g: parseFloat(document.getElementById('pt_accel_g').value),
+                decel_g: parseFloat(document.getElementById('pt_decel_g').value),
+                push_current_percent: parseInt(document.getElementById('pt_push_current').value)
             };
             
             const response = await fetch(`/api/gripper/position_table/${position}`, {
@@ -823,11 +819,9 @@
                 
                 row.innerHTML = `
                     <td>${pos.position}</td>
-                    <td>${pos.target_position || 0}</td>
-                    <td>${pos.positioning_speed || 0}</td>
-                    <td>${pos.moving_force || 0}</td>
-                    <td>${pos.gripping_speed || 0}</td>
-                    <td>${pos.gripping_force || 0}</td>
+                    <td>${(pos.position_mm || 0).toFixed(2)}</td>
+                    <td>${(pos.width_mm || 0).toFixed(2)}</td>
+                    <td>${(pos.speed_mm_s || 0).toFixed(1)}</td>
                 `;
             }
             

@@ -716,13 +716,12 @@ async def set_position_data(position: int, request: Request):
         data = await request.json()
         gripper.set_position_data(
             position,
-            target_position=data.get("target_position"),
-            positioning_speed=data.get("positioning_speed"),
-            moving_force=data.get("moving_force"),
-            gripping_speed=data.get("gripping_speed"),
-            gripping_force=data.get("gripping_force"),
-            gripping_width=data.get("gripping_width"),
-            area_1=data.get("area_1")
+            position_mm=data.get("position_mm"),
+            width_mm=data.get("width_mm"),
+            speed_mm_s=data.get("speed_mm_s"),
+            accel_g=data.get("accel_g"),
+            decel_g=data.get("decel_g"),
+            push_current_percent=data.get("push_current_percent", 0)
         )
         return {"status": "ok", "message": f"ポジション{position}のデータを設定しました"}
     except Exception as e:
