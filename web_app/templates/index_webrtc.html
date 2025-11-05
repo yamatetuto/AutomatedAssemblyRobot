@@ -1,0 +1,544 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>自動組立ロボット制御 - WebRTC版</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+        
+        .container {
+            max-width: 1600px;
+            margin: 0 auto;
+        }
+        
+        h1 {
+            text-align: center;
+            color: white;
+            margin-bottom: 30px;
+            font-size: 2.5em;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+        }
+        
+        .grid {
+            display: grid;
+            grid-template-columns: 2fr 1fr;
+            gap: 20px;
+            margin-bottom: 20px;
+        }
+        
+        .card {
+            background: white;
+            border-radius: 15px;
+            padding: 25px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.3);
+        }
+        
+        .card h2 {
+            margin-bottom: 20px;
+            color: #667eea;
+            border-bottom: 3px solid #667eea;
+            padding-bottom: 10px;
+            cursor: pointer;
+            user-select: none;
+        }
+        
+        .card h2:hover {
+            opacity: 0.8;
+        }
+        
+        .card h2::before {
+            content: '▼ ';
+            display: inline-block;
+            transition: transform 0.3s;
+        }
+        
+        .card h2.collapsed::before {
+            transform: rotate(-90deg);
+        }
+        
+        .card-content {
+            max-height: 5000px;
+            overflow: hidden;
+            transition: max-height 0.5s ease-out;
+        }
+        
+        .card-content.collapsed {
+            max-height: 0;
+        }
+        
+        video {
+            width: 100%;
+            border-radius: 10px;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.2);
+            background: #000;
+        }
+        
+        .status {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 8px;
+            margin: 15px 0;
+        }
+        
+        .status-item {
+            display: flex;
+            justify-content: space-between;
+            margin: 8px 0;
+            padding: 8px;
+            background: white;
+            border-radius: 5px;
+        }
+        
+        .status-label {
+            font-weight: bold;
+            color: #555;
+        }
+        
+        .status-value {
+            color: #667eea;
+            font-weight: 500;
+        }
+        
+        .controls {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 10px;
+            margin-top: 15px;
+        }
+        
+        .btn {
+            padding: 12px 20px;
+            border: none;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.3s;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+        
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 12px rgba(0,0,0,0.2);
+        }
+        
+        .btn:active {
+            transform: translateY(0);
+        }
+        
+        .btn-primary {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+        
+        .btn-success {
+            background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%);
+            color: white;
+        }
+        
+        .btn-danger {
+            background: linear-gradient(135deg, #eb3349 0%, #f45c43 100%);
+            color: white;
+        }
+        
+        .btn-warning {
+            background: linear-gradient(135deg, #f2994a 0%, #f2c94c 100%);
+            color: white;
+        }
+        
+        .btn-full {
+            grid-column: 1 / -1;
+        }
+        
+        .control-group {
+            margin: 10px 0;
+        }
+        
+        .control-group label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+            color: #555;
+        }
+        
+        .control-group input[type="range"] {
+            width: 100%;
+        }
+        
+        .control-group .value-display {
+            float: right;
+            color: #667eea;
+            font-weight: bold;
+        }
+        
+        .position-control {
+            display: flex;
+            gap: 10px;
+            margin-top: 15px;
+        }
+        
+        .position-control input {
+            flex: 1;
+            padding: 12px;
+            border: 2px solid #667eea;
+            border-radius: 8px;
+            font-size: 16px;
+        }
+        
+        .message {
+            padding: 15px;
+            border-radius: 8px;
+            margin: 15px 0;
+            display: none;
+        }
+        
+        .message.success {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        
+        .message.error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+        
+        .indicator {
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            margin-left: 10px;
+        }
+        
+        .indicator.on {
+            background: #38ef7d;
+            box-shadow: 0 0 10px #38ef7d;
+        }
+        
+        .indicator.off {
+            background: #eb3349;
+            box-shadow: 0 0 10px #eb3349;
+        }
+        
+        .camera-params {
+            max-height: 400px;
+            overflow-y: auto;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🤖 自動組立ロボット制御システム (WebRTC版)</h1>
+        
+        <div class="grid">
+            <!-- カメラ部分 -->
+            <div class="card">
+                <h2 id="cameraHeader">📷 カメラ (WebRTC)</h2>
+                <div class="card-content" id="cameraContent">
+                    <video id="videoElement" autoplay playsinline></video>
+                    <div class="status">
+                        <h3>カメラ情報</h3>
+                        <div class="status-item">
+                            <span class="status-label">解像度:</span>
+                            <span class="status-value" id="cameraResolution">-</span>
+                        </div>
+                        <div class="status-item">
+                            <span class="status-label">FPS:</span>
+                            <span class="status-value" id="cameraFPS">-</span>
+                        </div>
+                        <div class="status-item">
+                            <span class="status-label">接続状態:</span>
+                            <span class="status-value" id="webrtcStatus">未接続</span>
+                        </div>
+                    </div>
+                    
+                    <button class="btn btn-success btn-full" onclick="startWebRTC()">WebRTC開始</button>
+                </div>
+            </div>
+            
+            <!-- グリッパー制御 -->
+            <div class="card">
+                <h2 id="gripperHeader">🤖 グリッパー制御</h2>
+                <div class="card-content" id="gripperContent">
+                    <div class="status">
+                        <div class="status-item">
+                            <span class="status-label">サーボ状態:</span>
+                            <span class="status-value" id="servoStatus">
+                                -
+                                <span class="indicator off" id="servoIndicator"></span>
+                            </span>
+                        </div>
+                        <div class="status-item">
+                            <span class="status-label">現在位置:</span>
+                            <span class="status-value" id="gripperPosition">-</span>
+                        </div>
+                        <div class="status-item">
+                            <span class="status-label">位置 (mm):</span>
+                            <span class="status-value" id="gripperPositionMM">-</span>
+                        </div>
+                        <div class="status-item">
+                            <span class="status-label">アラーム:</span>
+                            <span class="status-value" id="gripperAlarm">-</span>
+                        </div>
+                    </div>
+                    
+                    <div id="message" class="message"></div>
+                    
+                    <div class="controls">
+                        <button class="btn btn-success" onclick="servoOn()">サーボ ON</button>
+                        <button class="btn btn-danger" onclick="servoOff()">サーボ OFF</button>
+                        <button class="btn btn-warning btn-full" onclick="goHome()">原点復帰</button>
+                    </div>
+                    
+                    <div class="position-control">
+                        <input type="number" id="positionInput" placeholder="ポジション番号 (0-99)" min="0" max="99" value="0">
+                        <button class="btn btn-primary" onclick="moveToPosition()">移動</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- カメラパラメータ調整 -->
+        <div class="card">
+            <h2 id="paramsHeader" class="collapsed">🎛️ カメラパラメータ調整</h2>
+            <div class="card-content collapsed camera-params" id="paramsContent">
+                <div id="cameraControls"></div>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        let pc = null;
+        
+        // 折りたたみ機能
+        document.querySelectorAll('.card h2').forEach(header => {
+            header.addEventListener('click', function() {
+                this.classList.toggle('collapsed');
+                const content = this.nextElementSibling;
+                content.classList.toggle('collapsed');
+            });
+        });
+        
+        // WebRTC開始
+        async function startWebRTC() {
+            try {
+                pc = new RTCPeerConnection({
+                    iceServers: [{urls: 'stun:stun.l.google.com:19302'}]
+                });
+                
+                pc.addEventListener('track', (evt) => {
+                    document.getElementById('videoElement').srcObject = evt.streams[0];
+                    document.getElementById('webrtcStatus').textContent = '接続済み';
+                });
+                
+                pc.addEventListener('connectionstatechange', () => {
+                    console.log('Connection state:', pc.connectionState);
+                    document.getElementById('webrtcStatus').textContent = pc.connectionState;
+                });
+                
+                // Offerを作成
+                const offer = await pc.createOffer();
+                await pc.setLocalDescription(offer);
+                
+                // サーバーにOfferを送信
+                const response = await fetch('/api/webrtc/offer', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        sdp: pc.localDescription.sdp,
+                        type: pc.localDescription.type,
+                        width: 640,
+                        height: 480
+                    })
+                });
+                
+                const answer = await response.json();
+                await pc.setRemoteDescription(new RTCSessionDescription(answer));
+                
+            } catch (error) {
+                console.error('WebRTC開始エラー:', error);
+                showMessage('WebRTC接続エラー: ' + error.message, 'error');
+            }
+        }
+        
+        // カメラ情報を取得
+        async function updateCameraStatus() {
+            try {
+                const response = await fetch('/api/camera/status');
+                const data = await response.json();
+                
+                if (data.status === 'ok') {
+                    document.getElementById('cameraResolution').textContent = 
+                        `${data.width}x${data.height}`;
+                    document.getElementById('cameraFPS').textContent = 
+                        data.fps.toFixed(1);
+                }
+            } catch (error) {
+                console.error('カメラ情報取得エラー:', error);
+            }
+        }
+        
+        // カメラコントロール一覧取得
+        async function loadCameraControls() {
+            try {
+                const response = await fetch('/api/camera/controls');
+                const data = await response.json();
+                
+                if (data.status === 'ok') {
+                    const container = document.getElementById('cameraControls');
+                    container.innerHTML = '';
+                    
+                    for (const [name, ctrl] of Object.entries(data.controls)) {
+                        const div = document.createElement('div');
+                        div.className = 'control-group';
+                        div.innerHTML = `
+                            <label>
+                                ${name}
+                                <span class="value-display" id="val-${name}">${ctrl.value || ctrl.default}</span>
+                            </label>
+                            <input type="range" 
+                                   id="ctrl-${name}" 
+                                   min="${ctrl.min}" 
+                                   max="${ctrl.max}" 
+                                   value="${ctrl.value || ctrl.default}"
+                                   oninput="updateCameraControl('${name}', this.value)">
+                        `;
+                        container.appendChild(div);
+                    }
+                }
+            } catch (error) {
+                console.error('カメラコントロール取得エラー:', error);
+            }
+        }
+        
+        // カメラパラメータ更新
+        async function updateCameraControl(name, value) {
+            document.getElementById(`val-${name}`).textContent = value;
+            
+            try {
+                await fetch(`/api/camera/control/${name}/${value}`, {method: 'POST'});
+            } catch (error) {
+                console.error('パラメータ更新エラー:', error);
+            }
+        }
+        
+        // グリッパー状態を取得
+        async function updateGripperStatus() {
+            try {
+                const response = await fetch('/api/gripper/status');
+                const data = await response.json();
+                
+                if (data.status === 'ok') {
+                    document.getElementById('gripperPosition').textContent = data.position;
+                    document.getElementById('gripperPositionMM').textContent = 
+                        data.position_mm.toFixed(2) + ' mm';
+                    document.getElementById('gripperAlarm').textContent = 
+                        data.alarm === 0 ? 'なし' : `0x${data.alarm.toString(16)}`;
+                    
+                    const servoStatus = document.getElementById('servoStatus');
+                    if (data.servo_on) {
+                        servoStatus.innerHTML = 'ON <span class="indicator on"></span>';
+                    } else {
+                        servoStatus.innerHTML = 'OFF <span class="indicator off"></span>';
+                    }
+                } else {
+                    showMessage(data.message, 'error');
+                }
+            } catch (error) {
+                console.error('グリッパー状態取得エラー:', error);
+            }
+        }
+        
+        // メッセージ表示
+        function showMessage(text, type) {
+            const messageEl = document.getElementById('message');
+            messageEl.textContent = text;
+            messageEl.className = `message ${type}`;
+            messageEl.style.display = 'block';
+            
+            setTimeout(() => {
+                messageEl.style.display = 'none';
+            }, 3000);
+        }
+        
+        // サーボON
+        async function servoOn() {
+            try {
+                const response = await fetch('/api/gripper/servo/on', { method: 'POST' });
+                const data = await response.json();
+                showMessage(data.message, data.status === 'ok' ? 'success' : 'error');
+                updateGripperStatus();
+            } catch (error) {
+                showMessage('エラー: ' + error.message, 'error');
+            }
+        }
+        
+        // サーボOFF
+        async function servoOff() {
+            try {
+                const response = await fetch('/api/gripper/servo/off', { method: 'POST' });
+                const data = await response.json();
+                showMessage(data.message, data.status === 'ok' ? 'success' : 'error');
+                updateGripperStatus();
+            } catch (error) {
+                showMessage('エラー: ' + error.message, 'error');
+            }
+        }
+        
+        // 原点復帰
+        async function goHome() {
+            try {
+                showMessage('原点復帰中...', 'success');
+                const response = await fetch('/api/gripper/home', { method: 'POST' });
+                const data = await response.json();
+                showMessage(data.message, data.status === 'ok' ? 'success' : 'error');
+                updateGripperStatus();
+            } catch (error) {
+                showMessage('エラー: ' + error.message, 'error');
+            }
+        }
+        
+        // 位置決め
+        async function moveToPosition() {
+            const position = document.getElementById('positionInput').value;
+            
+            if (position < 0 || position > 99) {
+                showMessage('ポジション番号は0-99の範囲で指定してください', 'error');
+                return;
+            }
+            
+            try {
+                showMessage(`位置${position}へ移動中...`, 'success');
+                const response = await fetch(`/api/gripper/move/${position}`, { method: 'POST' });
+                const data = await response.json();
+                showMessage(data.message, data.status === 'ok' ? 'success' : 'error');
+                updateGripperStatus();
+            } catch (error) {
+                showMessage('エラー: ' + error.message, 'error');
+            }
+        }
+        
+        // 初期化
+        updateCameraStatus();
+        updateGripperStatus();
+        loadCameraControls();
+        
+        // 定期更新
+        setInterval(updateGripperStatus, 2000);
+    </script>
+</body>
+</html>
