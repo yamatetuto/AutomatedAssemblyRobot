@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>自動組立ロボット制御 v1.2</title>
+    <title>自動組立ロボット制御 v1.3</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
@@ -274,8 +274,17 @@
         .postable-container {
             max-height: 500px;
             overflow-y: auto;
+            overflow-x: auto;
+        }
+        .postable-container::-webkit-scrollbar {
+            height: 8px;
+        }
+        .postable-container::-webkit-scrollbar-thumb {
+            background: #00d4ff;
+            border-radius: 4px;
         }
         .postable-table {
+            min-width: 600px;
             width: 100%;
             border-collapse: collapse;
             font-size: 0.8em;
@@ -336,7 +345,7 @@
 </head>
 <body>
     <div class="header">
-        <h1>🤖 自動組立ロボット制御システム v1.2</h1>
+        <h1>🤖 自動組立ロボット制御システム v1.3</h1>
     </div>
     
     <div class="main-container">
@@ -431,6 +440,9 @@
                                         <th>位置<br>(mm)</th>
                                         <th>幅<br>(mm)</th>
                                         <th>速度<br>(mm/s)</th>
+                                        <th>加速<br>(G)</th>
+                                        <th>減速<br>(G)</th>
+                                        <th>押当<br>(%)</th>
                                     </tr>
                                 </thead>
                                 <tbody id="posTableBody">
@@ -590,15 +602,42 @@
                     const group = document.createElement('div');
                     group.className = 'control-group';
                     
-                    group.innerHTML = `
-                        <label>${name}: <span id="${name}-value">${ctrl.value}</span></label>
-                        <input type="range" 
-                               id="${name}" 
-                               min="${ctrl.min}" 
-                               max="${ctrl.max}" 
-                               value="${ctrl.value}"
-                               oninput="updateCameraControl('${name}', this.value)">
-                    `;
+                    if (ctrl.type === 'int') {
+                        // 既存のスライダー表示
+                        group.innerHTML = `
+                            <label>${name}: <span id="${name}-value">${ctrl.value}</span></label>
+                            <input type="range" 
+                                   id="${name}" 
+                                   min="${ctrl.min}" 
+                                   max="${ctrl.max}" 
+                                   value="${ctrl.value}"
+                                   oninput="updateCameraControl('${name}', this.value)">
+                        `;
+                    } else if (ctrl.type === 'bool') {
+                        // チェックボックス表示
+                        group.innerHTML = `
+                            <label>
+                                <input type="checkbox" 
+                                       id="${name}" 
+                                       ${ctrl.value ? 'checked' : ''}
+                                       onchange="updateCameraControl('${name}', this.checked ? 1 : 0)">
+                                ${name}
+                            </label>
+                        `;
+                    } else if (ctrl.type === 'menu') {
+                        // セレクトボックス表示
+                        let optionsHtml = '';
+                        for (const [optId, optLabel] of Object.entries(ctrl.options)) {
+                            optionsHtml += `<option value="${optId}" ${parseInt(optId) === ctrl.value ? 'selected' : ''}>${optLabel}</option>`;
+                        }
+                        group.innerHTML = `
+                            <label>${name}:</label>
+                            <select id="${name}" onchange="updateCameraControl('${name}', this.value)">
+                                ${optionsHtml}
+                            </select>
+                        `;
+                    }
+                    
                     container.appendChild(group);
                 }
             }
@@ -820,8 +859,11 @@
                 row.innerHTML = `
                     <td>${pos.position}</td>
                     <td>${(pos.position_mm || 0).toFixed(2)}</td>
-                    <td>${(pos.width_mm || 0).toFixed(2)}</td>
+                    <td>${(pos.width_mm || 0).toFixed(3)}</td>
                     <td>${(pos.speed_mm_s || 0).toFixed(1)}</td>
+                    <td>${(pos.accel_g || 0).toFixed(2)}</td>
+                    <td>${(pos.decel_g || 0).toFixed(2)}</td>
+                    <td>${pos.push_current_percent || 0}</td>
                 `;
             }
             

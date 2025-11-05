@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import re
 """
 統合Web UI - WebRTC対応版 (camera_controller方式採用)
 - WebRTC低遅延ストリーミング (shared_frame方式)
@@ -430,39 +431,85 @@ async def set_camera_resolution(request: Request):
 
 @app.get("/api/camera/controls")
 async def camera_controls():
-    """カメラ制御パラメータ一覧取得"""
+    """カメラ制御パラメータ一覧取得 (int/bool/menu対応)"""
     import subprocess
+    import re
     try:
         result = subprocess.run(
-            ["v4l2-ctl", f"--device=/dev/video{CAMERA_DEVICE}", "--list-ctrls"],
-            capture_output=True, text=True, check=True
+            ["v4l2-ctl", f"--device=/dev/video{CAMERA_DEVICE}", "-L"],
+            capture_output=True, text=True, check=True, timeout=5
         )
         
-        # パース処理
         controls = {}
-        for line in result.stdout.split('\n'):
-            if 'min=' in line and 'max=' in line:
-                parts = line.strip().split()
-                if len(parts) > 0:
-                    name = parts[0]
-                    min_val = max_val = default_val = value = None
-                    for part in parts:
-                        if part.startswith('min='):
-                            min_val = int(part.split('=')[1])
-                        elif part.startswith('max='):
-                            max_val = int(part.split('=')[1])
-                        elif part.startswith('default='):
-                            default_val = int(part.split('=')[1])
-                        elif part.startswith('value='):
-                            value = int(part.split('=')[1])
-                    
-                    if min_val is not None and max_val is not None:
-                        controls[name] = {
-                            "min": min_val,
-                            "max": max_val,
-                            "default": default_val,
-                            "value": value
-                        }
+        current_control_name = None
+        
+        for line in result.stdout.splitlines():
+            # セクションヘッダーをスキップ
+            if line.strip() in ('User Controls', 'Camera Controls', 'Codec Controls'):
+                continue
+            
+            # 整数型コントロールをパース
+            int_match = re.match(
+                r'\s*(\S+)\s+0x[0-9a-f]+\s+\(int\)\s*:\s*min=(-?\d+)\s+max=(-?\d+)\s+step=(\d+)\s+default=(-?\d+)\s+value=(-?\d+)',
+                line
+            )
+            if int_match:
+                name, min_val, max_val, step, default, value = int_match.groups()
+                current_control_name = name
+                controls[name] = {
+                    'type': 'int',
+                    'min': int(min_val),
+                    'max': int(max_val),
+                    'step': int(step),
+                    'default': int(default),
+                    'value': int(value)
+                }
+                continue
+            
+            # menu型コントロールをパース
+            menu_match = re.match(
+                r'\s*(\S+)\s+0x[0-9a-f]+\s+\(menu\)\s*:\s*min=(\d+)\s+max=(\d+)\s+default=(\d+)\s+value=(\d+)',
+                line
+            )
+            if menu_match:
+                name, min_val, max_val, default, value = menu_match.groups()
+                current_control_name = name
+                controls[name] = {
+                    'type': 'menu',
+                    'min': int(min_val),
+                    'max': int(max_val),
+                    'step': 1,
+                    'default': int(default),
+                    'value': int(value),
+                    'options': {}
+                }
+                continue
+            
+            # bool型コントロールをパース
+            bool_match = re.match(
+                r'\s*(\S+)\s+0x[0-9a-f]+\s+\(bool\)\s*:\s*default=([01])\s+value=([01])',
+                line
+            )
+            if bool_match:
+                name, default, value = bool_match.groups()
+                current_control_name = name
+                controls[name] = {
+                    'type': 'bool',
+                    'min': 0,
+                    'max': 1,
+                    'step': 1,
+                    'default': int(default),
+                    'value': int(value)
+                }
+                continue
+            
+            # メニューオプション行をパース
+            menu_opt_match = re.match(r'^\s+(\d+):\s+(.+)$', line)
+            if menu_opt_match and current_control_name:
+                ctrl = controls.get(current_control_name)
+                if ctrl and ctrl.get('type') == 'menu' and 'options' in ctrl:
+                    idx, label = menu_opt_match.groups()
+                    ctrl['options'][int(idx)] = label.strip()
         
         return {"status": "ok", "controls": controls}
     except Exception as e:
