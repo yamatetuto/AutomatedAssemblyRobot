@@ -13,6 +13,7 @@ import asyncio
 import json
 import traceback
 import datetime
+import signal
 from pathlib import Path
 from typing import Optional
 
@@ -213,6 +214,45 @@ except Exception as e:
     print(f"⚠️  グリッパー接続失敗: {e}")
 
 
+
+
+# シグナルハンドラーでカメラリセット
+def signal_handler(signum, frame):
+    """SIGTERM/SIGINTハンドラー"""
+    print(f"\n🛑 シグナル受信 ({signum}): カメラをリセットします...")
+    import subprocess
+    try:
+        result = subprocess.run(
+            ["v4l2-ctl", f"--device=/dev/video{CAMERA_DEVICE}", "-L"],
+            capture_output=True, text=True, timeout=5
+        )
+        reset_count = 0
+        for line in result.stdout.splitlines():
+            if 'default=' in line and '0x' in line:
+                parts = line.strip().split()
+                if len(parts) > 0:
+                    name = parts[0]
+                    for part in parts:
+                        if part.startswith('default='):
+                            default_val = part.split('=')[1]
+                            try:
+                                subprocess.run(
+                                    ["v4l2-ctl", f"--device=/dev/video{CAMERA_DEVICE}",
+                                     f"--set-ctrl={name}={default_val}"],
+                                    capture_output=True, timeout=2
+                                )
+                                reset_count += 1
+                            except:
+                                pass
+        print(f"📷 カメラパラメータリセット完了: {reset_count}件")
+    except Exception as e:
+        print(f"⚠️ カメラリセット失敗: {e}")
+    sys.exit(0)
+
+# シグナルハンドラー登録
+signal.signal(signal.SIGTERM, signal_handler)
+signal.signal(signal.SIGINT, signal_handler)
+
 @app.on_event("startup")
 async def startup_event():
     """起動時処理"""
@@ -233,9 +273,6 @@ async def shutdown_event():
     global frame_reader_task, camera_capture
     
     print("\n🛑 シャットダウン処理開始...")    
-    # カメラパラメータをデフォルトに戻す
-    await reset_camera_to_defaults()
-    
     # フレームリーダー停止
     if frame_reader_task:
         frame_reader_task.cancel()

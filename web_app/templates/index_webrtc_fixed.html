@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>自動組立ロボット制御 v1.7</title>
+    <title>自動組立ロボット制御 v2.0</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
@@ -221,7 +221,8 @@
             padding: 10px 16px;
             border-radius: 8px;
             box-shadow: 0 4px 15px rgba(39, 174, 96, 0.4);
-            z-index: 9999;
+            z-index: 1000;
+            pointer-events: none;
             font-size: 0.9em;
             font-weight: 500;
             display: flex;
@@ -254,8 +255,12 @@
             max-width: 400px;
             font-size: 1em;
             font-weight: 500;
+            pointer-events: none;
         }
-        .toast.show { opacity: 1; }
+        .toast.show { 
+            opacity: 1;
+            pointer-events: auto;
+        }
         .toast.error {
             background: #e74c3c;
             border-color: #c0392b;
@@ -372,7 +377,7 @@
 </head>
 <body>
     <div class="header">
-        <h1>🤖 自動組立ロボット制御システム v1.7</h1>
+        <h1>🤖 自動組立ロボット制御システム v2.0</h1>
     </div>
     
     <div class="main-container">
@@ -483,7 +488,7 @@
                             <button onclick="loadPositionTable()">📥 読み込み</button>
                         </div>
                         
-                        <div id="posTableData" class="controls" style="display:none; margin-top: 10px;">
+                        <div id="posTableData" class="controls" style="display:none; margin-top: 10px; position: relative; z-index: 50;">
                             <div class="control-group">
                                 <label>目標位置 (mm):</label>
                                 <input type="number" id="pt_position_mm" min="0" max="4" step="0.01" value="0">
@@ -508,7 +513,7 @@
                                 <label>押付け電流 (%):</label>
                                 <input type="number" id="pt_push_current" min="0" max="70" value="0">
                             </div>
-                            <button onclick="savePositionTable()" style="width: 100%; margin-top: 5px;">💾 保存</button>
+                            <button onclick="savePositionTable()" style="width: 100%; margin-top: 5px; position: relative; z-index: 100; cursor: pointer; pointer-events: auto;">💾 保存</button>
                         </div>
                     </div>
                 </div>
@@ -536,7 +541,18 @@
             const toast = document.getElementById('toast');
             toast.textContent = message;
             toast.className = 'toast show ' + type;
-            setTimeout(() => toast.classList.remove('show'), 5000);
+            
+            // クリックで即座に消える
+            toast.onclick = () => {
+                toast.classList.remove('show');
+                toast.onclick = null;
+            };
+            
+            // 5秒後に自動で消える
+            setTimeout(() => {
+                toast.classList.remove('show');
+                toast.onclick = null;
+            }, 5000);
         }
         
         function togglePanel(panelId) {
@@ -821,7 +837,7 @@
         
         // ポジションテーブル: 個別保存
         async function savePositionTable() {
-            const position = document.getElementById('posTableSelect').value;
+            const position = parseInt(document.getElementById('posTableSelect').value);
             const data = {
                 position_mm: parseFloat(document.getElementById('pt_position_mm').value),
                 width_mm: parseFloat(document.getElementById('pt_width_mm').value),
@@ -840,9 +856,10 @@
             const result = await response.json();
             if (result.status === 'ok') {
                 showToast(result.message, 'success');
-                // テーブル表示中なら再読み込み
+                
+                // テーブル表示中なら該当ポジションのみ再取得して更新
                 if (isTableView && allPositions.length > 0) {
-                    loadAllPositions();
+                    await updateSinglePosition(position);
                 }
             } else {
                 showToast('保存失敗: ' + result.message, 'error');
@@ -921,6 +938,27 @@
                     displayPositionTable();
                 };
                 pagination.appendChild(btn);
+            }
+        }
+        
+        // ポジションテーブル: 単一ポジションのデータを再取得して更新
+        async function updateSinglePosition(position) {
+            try {
+                const response = await fetch(`/api/gripper/position_table/${position}`);
+                const data = await response.json();
+                
+                if (data.status === 'ok') {
+                    // allPositions配列内の該当データを更新
+                    const index = allPositions.findIndex(pos => pos.position === position);
+                    if (index !== -1) {
+                        allPositions[index] = { position: position, ...data.data };
+                        // テーブルを再描画
+                        displayPositionTable();
+                        console.log(`Position ${position} updated in table`);
+                    }
+                }
+            } catch (e) {
+                console.error(`Position ${position} update error:`, e);
             }
         }
         
