@@ -792,21 +792,12 @@
                 const response = await fetch('/api/gripper/status');
                 const data = await response.json();
                 
-                console.log('updateGripperStatus:', data);
-                
                 if (data.status === 'ok') {
-                    const text = `位置: ${data.position_mm.toFixed(2)}mm | サーボ: ${data.servo_on ? 'ON' : 'OFF'}`;
-                    console.log('Updating gripperStatus to:', text);
-                    const element = document.getElementById('gripperStatus');
-                    if (element) {
-                        element.textContent = text;
-                        console.log('Element updated successfully');
-                    } else {
-                        console.error('gripperStatus element not found!');
-                    }
+                    document.getElementById('gripperStatus').textContent = 
+                        `位置: ${data.position_mm.toFixed(2)}mm | サーボ: ${data.servo_on ? 'ON' : 'OFF'}`;
                 }
             } catch (e) {
-                console.error('updateGripperStatus error:', e);
+                console.error('Gripper status update error:', e);
             }
         }
         
