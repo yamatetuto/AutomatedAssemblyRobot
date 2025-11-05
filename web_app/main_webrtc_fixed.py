@@ -685,16 +685,17 @@ async def gripper_status():
 
 @app.post("/api/gripper/servo/{action}")
 async def gripper_servo(action: str):
-    """グリッパーサーボON/OFF"""
+    """グリッパーサーボON/OFF (非ブロッキング)"""
     if not gripper:
         return JSONResponse({"status": "error", "message": "グリッパー未接続"}, status_code=503)
     
     try:
+        loop = asyncio.get_event_loop()
         if action == "on":
-            gripper.servo_on()
+            await loop.run_in_executor(None, gripper.servo_on)
             return {"status": "ok"}
         elif action == "off":
-            gripper.servo_off()
+            await loop.run_in_executor(None, gripper.servo_off)
             return {"status": "ok"}
         else:
             return JSONResponse({"status": "error", "message": "無効なアクション"}, status_code=400)
@@ -704,12 +705,13 @@ async def gripper_servo(action: str):
 
 @app.post("/api/gripper/home")
 async def gripper_home():
-    """グリッパー原点復帰"""
+    """グリッパー原点復帰 (非ブロッキング)"""
     if not gripper:
         return JSONResponse({"status": "error", "message": "グリッパー未接続"}, status_code=503)
     
     try:
-        gripper.home()
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(None, gripper.home)
         return {"status": "ok"}
     except Exception as e:
         return JSONResponse({"status": "error", "message": str(e)}, status_code=500)
@@ -717,7 +719,7 @@ async def gripper_home():
 
 @app.post("/api/gripper/move/{position}")
 async def gripper_move(position: int):
-    """グリッパー位置決め"""
+    """グリッパー位置決め (非ブロッキング)"""
     if not gripper:
         return JSONResponse({"status": "error", "message": "グリッパー未接続"}, status_code=503)
     
@@ -728,7 +730,8 @@ async def gripper_move(position: int):
         }, status_code=400)
     
     try:
-        gripper.move_to_pos(position)
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(None, gripper.move_to_pos, position)
         return {"status": "ok"}
     except Exception as e:
         return JSONResponse({"status": "error", "message": str(e)}, status_code=500)
