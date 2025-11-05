@@ -232,6 +232,10 @@ async def shutdown_event():
     """終了時処理"""
     global frame_reader_task, camera_capture
     
+    print("\n🛑 シャットダウン処理開始...")    
+    # カメラパラメータをデフォルトに戻す
+    await reset_camera_to_defaults()
+    
     # フレームリーダー停止
     if frame_reader_task:
         frame_reader_task.cancel()
@@ -244,6 +248,7 @@ async def shutdown_event():
     if camera_capture:
         try:
             camera_capture.release()
+            print("📷 カメラを解放しました")
         except:
             pass
     
