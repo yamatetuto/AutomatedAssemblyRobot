@@ -1,0 +1,100 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# 環境変数
+.env
+.env.local
+config/*.key
+
+# ログ
+logs/
+*.log
+
+# スナップショット
+camera_controller/snapshots/*.jpg
+snapshots/*.jpg
+!camera_controller/snapshots/.gitkeep
+!snapshots/.gitkeep
+
+# チャット履歴
+docs/chats/*.json
+
+# バックアップファイル
+*_backup*
+*.bak
+*~
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*.sublime-project
+*.sublime-workspace
+
+# OS
+.DS_Store
+Thumbs.db
+*.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+
+# テスト
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.nox/
+coverage.xml
+*.cover
+
+# 一時ファイル
+*.tmp
+temp/
+tmp/
+
+# データベース
+*.db
+*.sqlite
+*.sqlite3
+
+# キャリブレーションデータ（機密）
+config/calibration_*.yaml
+config/*.secret
+
+# Jupyter Notebook
+.ipynb_checkpoints
+*.ipynb
+
+# pyenv
+.python-version
+
+# mypy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Pyre type checker
+.pyre/

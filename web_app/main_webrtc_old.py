@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-統合Web UI - WebRTC対応版 (デバッグ版)
-- WebRTC低遅延ストリーミング (answer側でtrack追加)
-- カメラパラメータ調整 (解像度変更、最小化対応)
-- グリッパーポジションテーブル詳細表示・編集
+統合Web UI - WebRTC対応版 (改善版)
+- WebRTC低遅延ストリーミング
+- カメラパラメータ調整 (解像度変更含む)
+- グリッパーポジションテーブル表示・編集
 """
 import os
 import sys
@@ -18,8 +18,7 @@ from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from aiortc import RTCPeerConnection, RTCSessionDescription, VideoStreamTrack, MediaStreamTrack
-from aiortc.contrib.media import MediaPlayer, MediaRelay
+from aiortc import RTCPeerConnection, RTCSessionDescription, VideoStreamTrack
 import av
 import numpy as np
 
@@ -47,8 +46,7 @@ pcs = set()  # アクティブなRTCPeerConnection
 camera_settings = {
     "width": 640,
     "height": 480,
-    "fps": 30,
-    "fourcc": "MJPG"  # デフォルトはMJPEG
+    "fps": 30
 }
 shared_frame = {"frame": None, "lock": asyncio.Lock()}
 
@@ -56,15 +54,12 @@ shared_frame = {"frame": None, "lock": asyncio.Lock()}
 class CameraVideoTrack(VideoStreamTrack):
     """WebRTC用カメラビデオトラック"""
     
-    kind = "video"  # 明示的にkindを設定
-    
     def __init__(self, device: int, width: int = 640, height: int = 480):
         super().__init__()
         self.device = device
         self.width = width
         self.height = height
         self._frame_count = 0
-        print(f"🎥 CameraVideoTrack初期化: {width}x{height}")
         
     async def recv(self):
         """フレーム取得"""
@@ -78,15 +73,11 @@ class CameraVideoTrack(VideoStreamTrack):
             # フォールバック: 黒画面
             black_frame = np.zeros((self.height, self.width, 3), dtype=np.uint8)
             video_frame = av.VideoFrame.from_ndarray(black_frame, format="bgr24")
-            if self._frame_count % 30 == 0:
-                print(f"⚫ フレーム未取得: 黒画面を送信 (count={self._frame_count})")
         else:
             # リサイズが必要な場合
             if frame.shape[0] != self.height or frame.shape[1] != self.width:
                 frame = cv2.resize(frame, (self.width, self.height))
             video_frame = av.VideoFrame.from_ndarray(frame, format="bgr24")
-            if self._frame_count % 30 == 0:
-                print(f"📹 フレーム送信: {frame.shape} (count={self._frame_count})")
         
         video_frame.pts = pts
         video_frame.time_base = time_base
@@ -98,7 +89,6 @@ class CameraVideoTrack(VideoStreamTrack):
 async def camera_frame_reader():
     """バックグラウンドでカメラフレームを読み取り"""
     cap = None
-    frame_count = 0
     
     while True:
         try:
@@ -108,25 +98,14 @@ async def camera_frame_reader():
                 cap.set(cv2.CAP_PROP_FRAME_WIDTH, camera_settings["width"])
                 cap.set(cv2.CAP_PROP_FRAME_HEIGHT, camera_settings["height"])
                 cap.set(cv2.CAP_PROP_FPS, camera_settings["fps"])
-                
-                # フォーマット設定 (MJPEG推奨)
-                fourcc = cv2.VideoWriter_fourcc(*camera_settings.get("fourcc", "MJPG"))
-                cap.set(cv2.CAP_PROP_FOURCC, fourcc)
-                
-                # フォーマット設定 (MJPEG推奨)
-                fourcc = cv2.VideoWriter_fourcc(*camera_settings.get("fourcc", "MJPG"))
-                cap.set(cv2.CAP_PROP_FOURCC, fourcc)
                 print(f"📷 カメラ再接続: {camera_settings['width']}x{camera_settings['height']} @ {camera_settings['fps']}fps")
             
             ret, frame = cap.read()
             if ret and frame is not None:
                 async with shared_frame["lock"]:
                     shared_frame["frame"] = frame.copy()
-                frame_count += 1
-                if frame_count % 100 == 0:
-                    print(f"📸 カメラフレーム取得: {frame.shape} (count={frame_count})")
             else:
-                print("⚠️ カメラフレーム取得失敗")
+                print("⚠️ フレーム読み取り失敗")
                 if cap:
                     cap.release()
                 cap = None
@@ -136,7 +115,7 @@ async def camera_frame_reader():
             await asyncio.sleep(1/camera_settings["fps"])
             
         except Exception as e:
-            print(f"❌ カメラエラー: {e}")
+            print(f"カメラエラー: {e}")
             if cap:
                 cap.release()
             cap = None
@@ -192,54 +171,30 @@ async def index(request: Request):
 
 @app.post("/api/webrtc/offer")
 async def webrtc_offer(request: Request):
-    """WebRTC Offer処理 (Answer側正しい実装)"""
+    """WebRTC Offer処理"""
     try:
         params = await request.json()
         offer = RTCSessionDescription(sdp=params["sdp"], type=params["type"])
         
         pc = RTCPeerConnection()
         pcs.add(pc)
-        print(f"🔗 WebRTC接続数: {len(pcs)}")
         
         @pc.on("connectionstatechange")
         async def on_connectionstatechange():
-            print(f"�� WebRTC状態変化: {pc.connectionState}")
+            print(f"WebRTC状態: {pc.connectionState}")
             if pc.connectionState in ["failed", "closed"]:
                 await pc.close()
                 pcs.discard(pc)
         
-        # リモートDescriptionを設定
-        await pc.setRemoteDescription(offer)
-        print(f"📥 Offer受信: {len(offer.sdp)} bytes")
-        
-        # Offer側が要求したtrackに対してanswerを返す
-        # transceiverを確認してビデオトラックを設定
+        # ビデオトラック追加
         width = params.get("width", camera_settings["width"])
         height = params.get("height", camera_settings["height"])
-        print(f"🎬 要求解像度: {width}x{height}")
+        video_track = CameraVideoTrack(device=CAMERA_DEVICE, width=width, height=height)
+        pc.addTrack(video_track)
         
-        # transceiverの状態をデバッグ
-        transceivers = pc.getTransceivers()
-        print(f"🔍 Transceiver数: {len(transceivers)}")
-        for i, transceiver in enumerate(transceivers):
-            print(f"  [{i}] kind={transceiver.kind}, direction={transceiver.direction}, mid={transceiver.mid}")
-        
-        # 既存のtransceiverを取得して、カメラトラックを割り当て
-        video_track_set = False
-        for transceiver in transceivers:
-            if transceiver.kind == "video":
-                video_track = CameraVideoTrack(device=CAMERA_DEVICE, width=width, height=height)
-                transceiver.sender.replaceTrack(video_track)
-                print(f"✅ ビデオトラック設定完了: {width}x{height}")
-                video_track_set = True
-        
-        if not video_track_set:
-            print("⚠️ ビデオtransceiverが見つかりません!")
-        
-        # Answerを作成
+        await pc.setRemoteDescription(offer)
         answer = await pc.createAnswer()
         await pc.setLocalDescription(answer)
-        print(f"📤 Answer送信: {len(answer.sdp)} bytes")
         
         return JSONResponse({
             "sdp": pc.localDescription.sdp,
@@ -285,6 +240,7 @@ async def camera_status():
 @app.get("/api/camera/resolutions")
 async def camera_resolutions():
     """カメラ対応解像度一覧"""
+    # 一般的な解像度リスト
     common_resolutions = [
         {"width": 320, "height": 240, "label": "QVGA (320x240)"},
         {"width": 640, "height": 480, "label": "VGA (640x480)"},
@@ -309,16 +265,13 @@ async def set_camera_resolution(request: Request):
         width = params.get("width")
         height = params.get("height")
         fps = params.get("fps", 30)
-        fourcc = params.get("fourcc", "MJPG")
-        fourcc = params.get("fourcc", "MJPG")
         
         if width and height:
             camera_settings["width"] = width
             camera_settings["height"] = height
             camera_settings["fps"] = fps
-            camera_settings["fourcc"] = fourcc
-            camera_settings["fourcc"] = fourcc
             
+            # カメラフレームリーダーが自動的に新しい設定を適用
             return {
                 "status": "ok",
                 "message": f"解像度を{width}x{height}に変更しました",
@@ -377,44 +330,19 @@ async def camera_controls():
 
 @app.post("/api/camera/control/{control_name}/{value}")
 async def set_camera_control(control_name: str, value: int):
-    """カメラパラメータ設定 (サイレント)"""
+    """カメラパラメータ設定"""
     import subprocess
     try:
         subprocess.run(
             ["v4l2-ctl", f"--device=/dev/video{CAMERA_DEVICE}", f"--set-ctrl={control_name}={value}"],
             check=True, capture_output=True
         )
-        return {"status": "ok"}  # メッセージなし
+        return {"status": "ok", "message": f"{control_name}を{value}に設定しました"}
     except subprocess.CalledProcessError as e:
         return JSONResponse({
             "status": "error", 
             "message": f"設定失敗: {e.stderr.decode()}"
         }, status_code=500)
-
-@app.post("/api/camera/codec")
-async def set_camera_codec(request: Request):
-    """カメラコーデック変更"""
-    try:
-        params = await request.json()
-        codec = params.get("codec", "MJPG")
-        
-        if codec not in ["MJPG", "YUYV"]:
-            return JSONResponse({
-                "status": "error",
-                "message": "無効なコーデック (MJPG or YUYV)"
-            }, status_code=400)
-        
-        camera_settings["fourcc"] = codec
-        print(f"�� コーデック変更: {codec}")
-        
-        return {
-            "status": "ok",
-            "message": f"コーデックを{codec}に変更しました",
-            "settings": camera_settings
-        }
-    except Exception as e:
-        return JSONResponse({"status": "error", "message": str(e)}, status_code=500)
-
 
 
 # ============ グリッパーAPI ============
@@ -433,8 +361,8 @@ async def gripper_status():
         
         return {
             "status": "ok",
-            "position": position,
-            "position_mm": position * 0.01,
+            "position": position,  # 0.01mm単位
+            "position_mm": position * 0.01,  # mm表示
             "alarm": alarm,
             "servo_on": servo_on
         }
@@ -444,19 +372,27 @@ async def gripper_status():
 
 @app.get("/api/gripper/positions")
 async def gripper_positions():
-    """グリッパーポジションテーブル全取得 (0-63、詳細情報込み)"""
+    """グリッパーポジションテーブル全取得 (0-99)"""
     if not gripper:
         return JSONResponse({"status": "error", "message": "グリッパー未接続"}, status_code=503)
     
     try:
         positions = {}
-        for pos_num in range(64):
+        # ポジション0-99を読み取り (レジスタアドレス 0x1000 + position_number)
+        for pos_num in range(100):
             try:
-                pos_data = gripper.get_position_data(pos_num)
-                if pos_data:
-                    positions[pos_num] = pos_data
+                register_addr = gripper.POS_TABLE_START + pos_num
+                value = gripper.instrument.read_register(register_addr, functioncode=3)
+                positions[pos_num] = {
+                    "value": value,
+                    "mm": value * 0.01
+                }
             except Exception as e:
-                positions[pos_num] = {"error": str(e)}
+                positions[pos_num] = {
+                    "value": None,
+                    "mm": None,
+                    "error": str(e)
+                }
         
         return {
             "status": "ok",
@@ -466,54 +402,53 @@ async def gripper_positions():
         return JSONResponse({"status": "error", "message": str(e)}, status_code=500)
 
 
-@app.post("/api/gripper/position/{position_num}/set")
-async def set_gripper_position_data(position_num: int, request: Request):
-    """グリッパーポジションテーブル書き込み (サイレント)"""
+@app.post("/api/gripper/position/{position_num}/set/{value}")
+async def set_gripper_position_table(position_num: int, value: int):
+    """グリッパーポジションテーブル書き込み"""
     if not gripper:
         return JSONResponse({"status": "error", "message": "グリッパー未接続"}, status_code=503)
     
-    if not (0 <= position_num <= 63):
+    # 範囲チェック
+    if not (0 <= position_num <= 99):
         return JSONResponse({
             "status": "error",
-            "message": f"ポジション番号は0-63の範囲です: {position_num}"
+            "message": f"ポジション番号は0-99の範囲です: {position_num}"
+        }, status_code=400)
+    
+    if not (0 <= value <= 400):  # 0-4mm = 0-400 (0.01mm単位)
+        return JSONResponse({
+            "status": "error",
+            "message": f"値は0-400の範囲です (0-4.00mm): {value}"
         }, status_code=400)
     
     try:
-        params = await request.json()
+        register_addr = gripper.POS_TABLE_START + position_num
+        gripper.instrument.write_register(register_addr, value, functioncode=6)
         
-        success = gripper.set_position_data(
-            position_number=position_num,
-            position_mm=params.get("position_mm"),
-            width_mm=params.get("width_mm", 0.1),
-            speed_mm_s=params.get("speed_mm_s", 78.0),
-            accel_g=params.get("accel_g", 0.30),
-            decel_g=params.get("decel_g", 0.30),
-            push_current_percent=params.get("push_current_percent", 0),
-            push_direction=params.get("push_direction", False)
-        )
-        
-        if success:
-            return {"status": "ok"}
-        else:
-            return JSONResponse({"status": "error", "message": "設定失敗"}, status_code=500)
-            
+        return {
+            "status": "ok",
+            "message": f"ポジション{position_num}に{value} ({value*0.01}mm)を設定しました",
+            "position": position_num,
+            "value": value,
+            "mm": value * 0.01
+        }
     except Exception as e:
         return JSONResponse({"status": "error", "message": str(e)}, status_code=500)
 
 
 @app.post("/api/gripper/servo/{action}")
 async def gripper_servo(action: str):
-    """グリッパーサーボON/OFF (サイレント)"""
+    """グリッパーサーボON/OFF"""
     if not gripper:
         return JSONResponse({"status": "error", "message": "グリッパー未接続"}, status_code=503)
     
     try:
         if action == "on":
-            gripper.servo_on()
-            return {"status": "ok"}
+            gripper.instrument.write_register(gripper.REG_CONTROL, gripper.VAL_SERVO_ON, functioncode=6)
+            return {"status": "ok", "message": "サーボON"}
         elif action == "off":
-            gripper.servo_off()
-            return {"status": "ok"}
+            gripper.instrument.write_register(gripper.REG_CONTROL, 0x0000, functioncode=6)
+            return {"status": "ok", "message": "サーボOFF"}
         else:
             return JSONResponse({"status": "error", "message": "無効なアクション"}, status_code=400)
     except Exception as e:
@@ -522,32 +457,40 @@ async def gripper_servo(action: str):
 
 @app.post("/api/gripper/home")
 async def gripper_home():
-    """グリッパー原点復帰 (サイレント)"""
+    """グリッパー原点復帰"""
     if not gripper:
         return JSONResponse({"status": "error", "message": "グリッパー未接続"}, status_code=503)
     
     try:
-        gripper.home()
-        return {"status": "ok"}
+        gripper.instrument.write_register(gripper.REG_CONTROL, gripper.VAL_HOME, functioncode=6)
+        # 原点復帰完了待機
+        await asyncio.sleep(3)
+        return {"status": "ok", "message": "原点復帰完了"}
     except Exception as e:
         return JSONResponse({"status": "error", "message": str(e)}, status_code=500)
 
 
 @app.post("/api/gripper/move/{position}")
 async def gripper_move(position: int):
-    """グリッパー位置決め (サイレント)"""
+    """グリッパー位置決め"""
     if not gripper:
         return JSONResponse({"status": "error", "message": "グリッパー未接続"}, status_code=503)
     
-    if not (0 <= position <= 63):
+    # 範囲チェック (0-99)
+    if not (0 <= position <= 99):
         return JSONResponse({
             "status": "error", 
-            "message": f"無効なポジション: {position}"
+            "message": f"無効なポジション: {position} (0-99の範囲で指定してください)"
         }, status_code=400)
     
     try:
-        gripper.move_to_pos(position)
-        return {"status": "ok"}
+        # ポジション指定
+        gripper.instrument.write_register(gripper.REG_POS_SELECT, position, functioncode=6)
+        # 位置決め起動
+        gripper.instrument.write_register(gripper.REG_CONTROL, gripper.VAL_START, functioncode=6)
+        # 移動完了待機
+        await asyncio.sleep(2)
+        return {"status": "ok", "message": f"ポジション{position}へ移動完了"}
     except Exception as e:
         return JSONResponse({"status": "error", "message": str(e)}, status_code=500)
 
@@ -555,3 +498,4 @@ async def gripper_move(position: int):
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
+

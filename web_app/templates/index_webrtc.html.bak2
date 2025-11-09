@@ -422,24 +422,12 @@
         
         // コーデック変更
         async function changeCodec() {
-            const codec = document.getElementById("codecSelect").value;
+            const codec = document.getElementById('codecSelect').value;
             currentCodec = codec;
             
-            const response = await fetch("/api/camera/codec", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ codec })
-            });
-            
-            const data = await response.json();
-            if (data.status === "ok") {
-                showToast(data.message, "success");
-                // WebRTC再接続
-                if (pc) {
-                    pc.close();
-                }
-                setTimeout(setupWebRTC, 1000);
-            }
+            // v4l2-ctl経由でフォーマット変更（実装が必要な場合）
+            // 現状はカメラ再接続時に反映される想定
+            showToast(`コーデックを${codec}に変更しました`, 'success');
         }
         
         // 解像度変更

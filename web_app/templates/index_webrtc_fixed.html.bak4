@@ -1,0 +1,946 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>自動組立ロボット制御 v1.7</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Segoe UI', sans-serif;
+            background: #1a1a2e;
+            color: #eee;
+            overflow: hidden;
+            height: 100vh;
+        }
+        
+        .header {
+            background: linear-gradient(135deg, #0f3460 0%, #533483 100%);
+            padding: 15px 20px;
+            text-align: center;
+            border-bottom: 2px solid #00d4ff;
+        }
+        .header h1 {
+            color: #00d4ff;
+            font-size: 1.8em;
+            text-shadow: 0 0 10px rgba(0, 212, 255, 0.5);
+            margin: 0;
+        }
+        
+        .main-container {
+            display: flex;
+            height: calc(100vh - 70px);
+        }
+        
+        .left-panel {
+            width: 70%;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            overflow-y: auto;
+        }
+        
+        .right-panel {
+            width: 30%;
+            padding: 20px;
+            background: #16213e;
+            border-left: 2px solid #00d4ff;
+            overflow-y: auto;
+        }
+        
+        .panel {
+            background: #16213e;
+            border-radius: 10px;
+            margin-bottom: 20px;
+            overflow: hidden;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+        }
+        .panel-header {
+            background: linear-gradient(135deg, #0f3460 0%, #533483 100%);
+            color: #00d4ff;
+            padding: 12px 15px;
+            cursor: pointer;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            user-select: none;
+            border-bottom: 2px solid #00d4ff;
+        }
+        .panel-header:hover { opacity: 0.9; }
+        .panel-header h2 { font-size: 1.2em; margin: 0; }
+        .toggle-icon {
+            font-size: 1.1em;
+            transition: transform 0.3s;
+        }
+        .toggle-icon.collapsed { transform: rotate(-90deg); }
+        .panel-body {
+            padding: 15px;
+            display: block;
+        }
+        .panel-body.collapsed { display: none; }
+        
+        .video-container {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            background: #000;
+            border-radius: 10px;
+            overflow: hidden;
+            border: 2px solid #00d4ff;
+            position: relative;
+            min-height: 400px;
+        }
+        
+        .video-wrapper {
+            flex: 1;
+            position: relative;
+            display: flex;
+            flex-direction: column;
+            min-height: 0;
+        }
+        
+        #videoElement {
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+            background: #000;
+        }
+        
+        .status {
+            text-align: center;
+            padding: 8px;
+            font-weight: bold;
+            font-size: 0.9em;
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            z-index: 10;
+        }
+        .status.connecting { background: #f39c12; color: #000; }
+        .status.connected { background: #27ae60; color: #fff; }
+        .status.disconnected { background: #e74c3c; color: #fff; }
+        
+        .video-controls {
+            padding: 12px;
+            background: #0f3460;
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+            align-items: center;
+            border-top: 2px solid #00d4ff;
+            z-index: 100;
+            position: relative;
+        }
+        .video-controls button {
+            flex: 0 0 auto;
+            padding: 10px 18px;
+            font-size: 1em;
+        }
+        .video-controls select {
+            flex: 1 1 150px;
+            min-width: 150px;
+            padding: 10px;
+            font-size: 0.95em;
+        }
+        
+        .controls {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+        .control-group {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+        .control-group label {
+            font-weight: 600;
+            color: #00d4ff;
+            font-size: 0.9em;
+        }
+        input[type="range"] {
+            width: 100%;
+            height: 6px;
+            background: #0f3460;
+            border-radius: 5px;
+            outline: none;
+        }
+        input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 16px;
+            height: 16px;
+            background: #00d4ff;
+            cursor: pointer;
+            border-radius: 50%;
+        }
+        select, button, input[type="number"] {
+            padding: 8px 12px;
+            border: 1px solid #00d4ff;
+            border-radius: 5px;
+            font-size: 0.9em;
+            cursor: pointer;
+            background: #0f3460;
+            color: #fff;
+        }
+        button {
+            background: linear-gradient(135deg, #00d4ff 0%, #533483 100%);
+            border: none;
+            font-weight: 600;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+        button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 15px rgba(0, 212, 255, 0.4);
+        }
+        button:active { transform: translateY(0); }
+        button.secondary {
+            background: linear-gradient(135deg, #e74c3c 0%, #c0392b 100%);
+        }
+        button.success {
+            background: linear-gradient(135deg, #27ae60 0%, #229954 100%);
+        }
+        
+        .button-row {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+        .button-row button {
+            flex: 1;
+            min-width: 100px;
+        }
+        
+        .gripper-status-fixed {
+            position: fixed;
+            top: 10px;
+            right: 20px;
+            background: #27ae60;
+            color: #fff;
+            padding: 10px 16px;
+            border-radius: 8px;
+            box-shadow: 0 4px 15px rgba(39, 174, 96, 0.4);
+            z-index: 9999;
+            font-size: 0.9em;
+            font-weight: 500;
+            display: flex;
+            flex-direction: row;
+            align-items: center;
+            gap: 12px;
+            min-width: 250px;
+        }
+        .gripper-status-fixed .status-label {
+            font-size: 0.9em;
+            opacity: 0.95;
+            border-right: 1px solid rgba(255,255,255,0.4);
+            padding-right: 12px;
+            white-space: nowrap;
+        }
+        
+        .toast {
+            position: fixed;
+            bottom: 30px;
+            right: 30px;
+            background: #16213e;
+            color: #00d4ff;
+            padding: 15px 20px;
+            border-radius: 8px;
+            border: 2px solid #00d4ff;
+            box-shadow: 0 4px 20px rgba(0, 212, 255, 0.5);
+            opacity: 0;
+            transition: opacity 0.3s;
+            z-index: 10000;
+            max-width: 400px;
+            font-size: 1em;
+            font-weight: 500;
+        }
+        .toast.show { opacity: 1; }
+        .toast.error {
+            background: #e74c3c;
+            border-color: #c0392b;
+            color: #fff;
+        }
+        .toast.success {
+            background: #27ae60;
+            border-color: #229954;
+            color: #fff;
+        }
+        
+        .snapshots-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+            gap: 10px;
+            margin-top: 10px;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+        .snapshot-item {
+            background: #0f3460;
+            border-radius: 5px;
+            overflow: hidden;
+            border: 2px solid #00d4ff;
+            transition: transform 0.2s;
+            cursor: pointer;
+        }
+        .snapshot-item:hover {
+            transform: scale(1.05);
+        }
+        .snapshot-item img {
+            width: 100%;
+            height: 80px;
+            object-fit: cover;
+        }
+        .snapshot-info {
+            padding: 5px;
+            font-size: 0.75em;
+            text-align: center;
+        }
+        
+        /* ポジションテーブル一覧用スタイル */
+        .postable-container {
+            max-height: 500px;
+            overflow-y: auto;
+            overflow-x: auto;
+        }
+        .postable-container::-webkit-scrollbar {
+            height: 8px;
+        }
+        .postable-container::-webkit-scrollbar-thumb {
+            background: #00d4ff;
+            border-radius: 4px;
+        }
+        .postable-table {
+            min-width: 600px;
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.8em;
+        }
+        .postable-table th {
+            background: #0f3460;
+            color: #00d4ff;
+            padding: 8px 4px;
+            position: sticky;
+            top: 0;
+            z-index: 1;
+            font-weight: 600;
+            border-bottom: 2px solid #00d4ff;
+        }
+        .postable-table td {
+            padding: 6px 4px;
+            border-bottom: 1px solid #0f3460;
+            text-align: center;
+        }
+        .postable-table tr:hover {
+            background: #0f3460;
+            cursor: pointer;
+        }
+        .postable-table tr.selected {
+            background: #533483;
+            border: 2px solid #00d4ff;
+        }
+        .pagination {
+            display: flex;
+            gap: 5px;
+            margin-top: 10px;
+            flex-wrap: wrap;
+            justify-content: center;
+        }
+        .pagination button {
+            padding: 5px 10px;
+            font-size: 0.85em;
+            min-width: 40px;
+        }
+        .pagination button.active {
+            background: #27ae60;
+        }
+        
+        ::-webkit-scrollbar {
+            width: 8px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #0f3460;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #00d4ff;
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #00a8cc;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>🤖 自動組立ロボット制御システム v1.7</h1>
+    </div>
+    
+    <div class="main-container">
+        <div class="left-panel">
+            <div class="video-container">
+                <div class="video-wrapper">
+                    <div id="connectionStatus" class="status connecting">接続中...</div>
+                    <video id="videoElement" autoplay playsinline muted></video>
+                </div>
+                <div class="video-controls">
+                    <button class="success" onclick="takeSnapshot()">📸 スナップショット</button>
+                    <select id="resolutionSelect" onchange="changeResolution()">
+                        <option value="320x240">QVGA (320x240)</option>
+                        <option value="640x480" selected>VGA (640x480)</option>
+                        <option value="800x600">SVGA (800x600)</option>
+                        <option value="1280x720">HD (1280x720)</option>
+                        <option value="1920x1080">Full HD (1920x1080)</option>
+                    </select>
+                    <select id="codecSelect" onchange="changeCodec()">
+                        <option value="MJPG" selected>MJPEG</option>
+                        <option value="YUYV">YUYV</option>
+                    </select>
+                </div>
+            </div>
+        </div>
+        
+        <div class="right-panel">
+            <div class="panel">
+                <div class="panel-header" onclick="togglePanel('params')">
+                    <h2>🎚️ カメラパラメータ</h2>
+                    <span class="toggle-icon" id="params-toggle">▼</span>
+                </div>
+                <div class="panel-body" id="params-body">
+                    <button class="secondary" onclick="resetCameraDefaults()" style="width: 100%; margin-bottom: 10px;">🔄 デフォルトに戻す</button>
+                    <div id="cameraControls" class="controls"></div>
+                </div>
+            </div>
+            
+            <div class="panel">
+                <div class="panel-header" onclick="togglePanel('snapshots')">
+                    <h2>📷 スナップショット</h2>
+                    <span class="toggle-icon collapsed" id="snapshots-toggle">▼</span>
+                </div>
+                <div class="panel-body collapsed" id="snapshots-body">
+                    <button onclick="loadSnapshots()" style="width: 100%; margin-bottom: 10px;">🔄 一覧更新</button>
+                    <div id="snapshotsGrid" class="snapshots-grid"></div>
+                </div>
+            </div>
+            
+            <div class="panel">
+                <div class="panel-header" onclick="togglePanel('gripper')">
+                    <h2>🤏 グリッパー制御</h2>
+                    <span class="toggle-icon collapsed" id="gripper-toggle">▼</span>
+                </div>
+                <div class="panel-body collapsed" id="gripper-body">
+                    <div class="button-row" style="margin-bottom: 10px;">
+                        <button onclick="gripperServo('on')">⚡ サーボON</button>
+                        <button onclick="gripperServo('off')">⭕ サーボOFF</button>
+                    </div>
+                    <button onclick="gripperHome()" style="width: 100%; margin-bottom: 10px;">🏠 原点復帰</button>
+                    
+                    <div class="control-group">
+                        <label>ポジション移動 (0-63):</label>
+                        <input type="number" id="positionInput" min="0" max="63" value="0">
+                        <button onclick="gripperMove()">➡️ 移動</button>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="panel">
+                <div class="panel-header" onclick="togglePanel('postable')">
+                    <h2>📋 ポジションテーブル</h2>
+                    <span class="toggle-icon collapsed" id="postable-toggle">▼</span>
+                </div>
+                <div class="panel-body collapsed" id="postable-body">
+                    <div class="button-row" style="margin-bottom: 10px;">
+                        <button onclick="loadAllPositions()">📥 全件読込</button>
+                        <button onclick="toggleTableView()">🔄 表示切替</button>
+                    </div>
+                    
+                    <!-- テーブル一覧表示 -->
+                    <div id="posTableList" style="display:none;">
+                        <div class="postable-container">
+                            <table class="postable-table">
+                                <thead>
+                                    <tr>
+                                        <th>Pos</th>
+                                        <th>位置<br>(mm)</th>
+                                        <th>幅<br>(mm)</th>
+                                        <th>速度<br>(mm/s)</th>
+                                        <th>加速<br>(G)</th>
+                                        <th>減速<br>(G)</th>
+                                        <th>押当<br>(%)</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="posTableBody">
+                                </tbody>
+                            </table>
+                        </div>
+                        <div class="pagination" id="pagination"></div>
+                    </div>
+                    
+                    <!-- 個別編集表示 -->
+                    <div id="posTableEdit">
+                        <div class="control-group" style="margin-bottom: 10px;">
+                            <label>ポジション番号 (0-63):</label>
+                            <input type="number" id="posTableSelect" min="0" max="63" value="0">
+                            <button onclick="loadPositionTable()">📥 読み込み</button>
+                        </div>
+                        
+                        <div id="posTableData" class="controls" style="display:none; margin-top: 10px;">
+                            <div class="control-group">
+                                <label>目標位置 (mm):</label>
+                                <input type="number" id="pt_position_mm" min="0" max="4" step="0.01" value="0">
+                            </div>
+                            <div class="control-group">
+                                <label>位置決め幅 (mm):</label>
+                                <input type="number" id="pt_width_mm" min="0" max="4" step="0.01" value="0.1">
+                            </div>
+                            <div class="control-group">
+                                <label>速度 (mm/s):</label>
+                                <input type="number" id="pt_speed_mm_s" min="2" max="78" step="0.1" value="50">
+                            </div>
+                            <div class="control-group">
+                                <label>加速度 (G):</label>
+                                <input type="number" id="pt_accel_g" min="0.01" max="0.3" step="0.01" value="0.3">
+                            </div>
+                            <div class="control-group">
+                                <label>減速度 (G):</label>
+                                <input type="number" id="pt_decel_g" min="0.01" max="0.3" step="0.01" value="0.3">
+                            </div>
+                            <div class="control-group">
+                                <label>押付け電流 (%):</label>
+                                <input type="number" id="pt_push_current" min="0" max="70" value="0">
+                            </div>
+                            <button onclick="savePositionTable()" style="width: 100%; margin-top: 5px;">💾 保存</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- 固定グリッパーステータス表示 -->
+    <div id="gripperStatusFixed" class="gripper-status-fixed">
+        <div class="status-label">🤏 グリッパー</div>
+        <span id="gripperStatus">位置: --mm | サーボ: --</span>
+    </div>
+    
+    <div id="toast" class="toast"></div>
+    
+    <script>
+        let pc = null;
+        let cameraDefaults = {};
+        let allPositions = [];
+        let currentPage = 0;
+        const itemsPerPage = 10;
+        let isTableView = false;
+        
+        function showToast(message, type = 'info') {
+            const toast = document.getElementById('toast');
+            toast.textContent = message;
+            toast.className = 'toast show ' + type;
+            setTimeout(() => toast.classList.remove('show'), 5000);
+        }
+        
+        function togglePanel(panelId) {
+            const body = document.getElementById(panelId + '-body');
+            const icon = document.getElementById(panelId + '-toggle');
+            body.classList.toggle('collapsed');
+            icon.classList.toggle('collapsed');
+        }
+        
+        function updateConnectionStatus(status) {
+            const statusDiv = document.getElementById('connectionStatus');
+            statusDiv.className = 'status ' + status;
+            const messages = {
+                'connecting': '🔄 接続中...',
+                'connected': '✅ 接続完了',
+                'disconnected': '❌ 切断'
+            };
+            statusDiv.textContent = messages[status] || status;
+        }
+        
+        async function setupWebRTC() {
+            updateConnectionStatus('connecting');
+            
+            try {
+                pc = new RTCPeerConnection({
+                    iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+                });
+                
+                pc.ontrack = (event) => {
+                    const video = document.getElementById('videoElement');
+                    
+                    if (event.streams && event.streams[0]) {
+                        video.srcObject = event.streams[0];
+                    }
+                    
+                    video.onloadedmetadata = () => {
+                        updateConnectionStatus('connected');
+                    };
+                    
+                    video.play().catch(e => console.error('再生エラー:', e));
+                };
+                
+                pc.oniceconnectionstatechange = () => {
+                    if (pc.iceConnectionState === 'failed' || pc.iceConnectionState === 'disconnected') {
+                        updateConnectionStatus('disconnected');
+                    }
+                };
+                
+                pc.addTransceiver("video", { direction: "recvonly" });
+                
+                const offer = await pc.createOffer();
+                await pc.setLocalDescription(offer);
+                
+                const response = await fetch('/api/webrtc/offer', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        sdp: pc.localDescription.sdp,
+                        type: pc.localDescription.type,
+                        width: 640,
+                        height: 480
+                    })
+                });
+                
+                if (!response.ok) {
+                    showToast('WebRTC接続エラー', 'error');
+                    updateConnectionStatus('disconnected');
+                    return;
+                }
+                
+                const answer = await response.json();
+                await pc.setRemoteDescription(new RTCSessionDescription(answer));
+                
+            } catch (error) {
+                showToast('WebRTC接続失敗: ' + error.message, 'error');
+                updateConnectionStatus('disconnected');
+            }
+        }
+        
+        async function loadCameraControls() {
+            const response = await fetch('/api/camera/controls');
+            const data = await response.json();
+            
+            if (data.status === 'ok') {
+                const container = document.getElementById('cameraControls');
+                container.innerHTML = '';
+                cameraDefaults = {};
+                
+                for (const [name, ctrl] of Object.entries(data.controls)) {
+                    cameraDefaults[name] = ctrl.default;
+                    
+                    const group = document.createElement('div');
+                    group.className = 'control-group';
+                    
+                    if (ctrl.type === 'int') {
+                        // 既存のスライダー表示
+                        group.innerHTML = `
+                            <label>${name}: <span id="${name}-value">${ctrl.value}</span></label>
+                            <input type="range" 
+                                   id="${name}" 
+                                   min="${ctrl.min}" 
+                                   max="${ctrl.max}" 
+                                   value="${ctrl.value}"
+                                   oninput="updateCameraControl('${name}', this.value)">
+                        `;
+                    } else if (ctrl.type === 'bool') {
+                        // チェックボックス表示
+                        group.innerHTML = `
+                            <label>
+                                <input type="checkbox" 
+                                       id="${name}" 
+                                       ${ctrl.value ? 'checked' : ''}
+                                       onchange="updateCameraControl('${name}', this.checked ? 1 : 0)">
+                                ${name}
+                            </label>
+                        `;
+                    } else if (ctrl.type === 'menu') {
+                        // セレクトボックス表示
+                        let optionsHtml = '';
+                        for (const [optId, optLabel] of Object.entries(ctrl.options)) {
+                            optionsHtml += `<option value="${optId}" ${parseInt(optId) === ctrl.value ? 'selected' : ''}>${optLabel}</option>`;
+                        }
+                        group.innerHTML = `
+                            <label>${name}:</label>
+                            <select id="${name}" onchange="updateCameraControl('${name}', this.value)">
+                                ${optionsHtml}
+                            </select>
+                        `;
+                    }
+                    
+                    container.appendChild(group);
+                }
+            }
+        }
+        
+        async function updateCameraControl(name, value) {
+            // int型の場合のみ-value要素を更新
+            const valueElement = document.getElementById(name + '-value');
+            if (valueElement) {
+                valueElement.textContent = value;
+            }
+            await fetch(`/api/camera/control/${name}/${value}`, { method: 'POST' });
+        }
+        
+        async function resetCameraDefaults() {
+            for (const [name, defaultValue] of Object.entries(cameraDefaults)) {
+                const control = document.getElementById(name);
+                if (control && defaultValue !== null) {
+                    // 型に応じて値を設定
+                    if (control.type === 'checkbox') {
+                        control.checked = (defaultValue === 1);
+                    } else if (control.type === 'select-one') {
+                        control.value = defaultValue;
+                    } else {
+                        control.value = defaultValue;
+                    }
+                    await updateCameraControl(name, defaultValue);
+                }
+            }
+            showToast('カメラパラメータをデフォルトに戻しました', 'success');
+        }
+        
+        async function changeResolution() {
+            const resolution = document.getElementById('resolutionSelect').value;
+            const [width, height] = resolution.split('x').map(Number);
+            
+            const response = await fetch('/api/camera/resolution', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ width, height })
+            });
+            
+            const data = await response.json();
+            if (data.status === 'ok') {
+                showToast(data.message, 'success');
+                if (pc) pc.close();
+                setTimeout(setupWebRTC, 1000);
+            }
+        }
+        
+        async function changeCodec() {
+            const codec = document.getElementById('codecSelect').value;
+            
+            const response = await fetch('/api/camera/codec', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ codec: codec })
+            });
+            
+            const data = await response.json();
+            if (data.status === 'ok') {
+                showToast(data.message, 'success');
+                if (pc) pc.close();
+                setTimeout(setupWebRTC, 1000);
+            }
+        }
+        
+        async function takeSnapshot() {
+            const response = await fetch('/api/camera/snapshot', { method: 'POST' });
+            const data = await response.json();
+            
+            if (data.status === 'ok') {
+                showToast(data.message, 'success');
+                loadSnapshots();
+            } else {
+                showToast('スナップショット失敗: ' + data.message, 'error');
+            }
+        }
+        
+        async function loadSnapshots() {
+            const response = await fetch('/api/camera/snapshots');
+            const data = await response.json();
+            
+            if (data.status === 'ok') {
+                const grid = document.getElementById('snapshotsGrid');
+                grid.innerHTML = '';
+                
+                data.snapshots.forEach(snap => {
+                    const item = document.createElement('div');
+                    item.className = 'snapshot-item';
+                    item.onclick = () => window.open(`/api/camera/snapshot/${snap.filename}`, '_blank');
+                    item.innerHTML = `
+                        <img src="/api/camera/snapshot/${snap.filename}" alt="${snap.filename}">
+                        <div class="snapshot-info">
+                            ${(snap.size / 1024).toFixed(0)} KB
+                        </div>
+                    `;
+                    grid.appendChild(item);
+                });
+                
+                showToast(`${data.snapshots.length}件のスナップショット`, 'success');
+            }
+        }
+        
+        async function updateGripperStatus() {
+            try {
+                const response = await fetch('/api/gripper/status');
+                const data = await response.json();
+                
+                if (data.status === 'ok') {
+                    document.getElementById('gripperStatus').textContent = 
+                        `位置: ${data.position_mm.toFixed(2)}mm | サーボ: ${data.servo_on ? 'ON' : 'OFF'}`;
+                }
+            } catch (e) {}
+        }
+        
+        async function gripperServo(action) {
+            await fetch(`/api/gripper/servo/${action}`, { method: 'POST' });
+            updateGripperStatus();
+        }
+        
+        async function gripperHome() {
+            await fetch('/api/gripper/home', { method: 'POST' });
+            updateGripperStatus();
+        }
+        
+        async function gripperMove() {
+            const position = document.getElementById('positionInput').value;
+            await fetch(`/api/gripper/move/${position}`, { method: 'POST' });
+            updateGripperStatus();
+        }
+        
+        // ポジションテーブル: 個別読み込み
+        async function loadPositionTable() {
+            const position = document.getElementById('posTableSelect').value;
+            const response = await fetch(`/api/gripper/position_table/${position}`);
+            const data = await response.json();
+            
+            if (data.status === 'ok') {
+                document.getElementById('pt_position_mm').value = data.data.position_mm || 0;
+                document.getElementById('pt_width_mm').value = data.data.width_mm || 0.1;
+                document.getElementById('pt_speed_mm_s').value = data.data.speed_mm_s || 50;
+                document.getElementById('pt_accel_g').value = data.data.accel_g || 0.3;
+                document.getElementById('pt_decel_g').value = data.data.decel_g || 0.3;
+                document.getElementById('pt_push_current').value = data.data.push_current_percent || 0;
+                document.getElementById('posTableData').style.display = 'flex';
+                showToast(`ポジション${position}のデータを読み込みました`, 'success');
+            } else {
+                showToast('読み込み失敗: ' + data.message, 'error');
+            }
+        }
+        
+        // ポジションテーブル: 個別保存
+        async function savePositionTable() {
+            const position = document.getElementById('posTableSelect').value;
+            const data = {
+                position_mm: parseFloat(document.getElementById('pt_position_mm').value),
+                width_mm: parseFloat(document.getElementById('pt_width_mm').value),
+                speed_mm_s: parseFloat(document.getElementById('pt_speed_mm_s').value),
+                accel_g: parseFloat(document.getElementById('pt_accel_g').value),
+                decel_g: parseFloat(document.getElementById('pt_decel_g').value),
+                push_current_percent: parseInt(document.getElementById('pt_push_current').value)
+            };
+            
+            const response = await fetch(`/api/gripper/position_table/${position}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(data)
+            });
+            
+            const result = await response.json();
+            if (result.status === 'ok') {
+                showToast(result.message, 'success');
+                // テーブル表示中なら再読み込み
+                if (isTableView && allPositions.length > 0) {
+                    loadAllPositions();
+                }
+            } else {
+                showToast('保存失敗: ' + result.message, 'error');
+            }
+        }
+        
+        // ポジションテーブル: 全件読み込み
+        async function loadAllPositions() {
+            showToast('全ポジションデータを読み込み中...', 'info');
+            allPositions = [];
+            
+            for (let i = 0; i < 64; i++) {
+                try {
+                    const response = await fetch(`/api/gripper/position_table/${i}`);
+                    const data = await response.json();
+                    if (data.status === 'ok') {
+                        allPositions.push({ position: i, ...data.data });
+                    }
+                } catch (e) {
+                    console.error(`Position ${i} load error:`, e);
+                }
+            }
+            
+            showToast(`${allPositions.length}件のデータを読み込みました`, 'success');
+            currentPage = 0;
+            displayPositionTable();
+            
+            // テーブル表示に切り替え
+            if (!isTableView) {
+                toggleTableView();
+            }
+        }
+        
+        // ポジションテーブル: 表示切替
+        function toggleTableView() {
+            isTableView = !isTableView;
+            document.getElementById('posTableList').style.display = isTableView ? 'block' : 'none';
+            document.getElementById('posTableEdit').style.display = isTableView ? 'none' : 'block';
+        }
+        
+        // ポジションテーブル: ページ表示
+        function displayPositionTable() {
+            const tbody = document.getElementById('posTableBody');
+            tbody.innerHTML = '';
+            
+            const start = currentPage * itemsPerPage;
+            const end = Math.min(start + itemsPerPage, allPositions.length);
+            
+            for (let i = start; i < end; i++) {
+                const pos = allPositions[i];
+                const row = tbody.insertRow();
+                row.onclick = () => editPositionFromTable(pos.position);
+                
+                row.innerHTML = `
+                    <td>${pos.position}</td>
+                    <td>${(pos.position_mm || 0).toFixed(2)}</td>
+                    <td>${(pos.width_mm || 0).toFixed(3)}</td>
+                    <td>${(pos.speed_mm_s || 0).toFixed(1)}</td>
+                    <td>${(pos.accel_g || 0).toFixed(2)}</td>
+                    <td>${(pos.decel_g || 0).toFixed(2)}</td>
+                    <td>${pos.push_current_percent || 0}</td>
+                `;
+            }
+            
+            // ページネーション
+            const totalPages = Math.ceil(allPositions.length / itemsPerPage);
+            const pagination = document.getElementById('pagination');
+            pagination.innerHTML = '';
+            
+            for (let i = 0; i < totalPages; i++) {
+                const btn = document.createElement('button');
+                btn.textContent = i + 1;
+                btn.className = i === currentPage ? 'active' : '';
+                btn.onclick = () => {
+                    currentPage = i;
+                    displayPositionTable();
+                };
+                pagination.appendChild(btn);
+            }
+        }
+        
+        // ポジションテーブル: テーブルから編集
+        function editPositionFromTable(position) {
+            // 編集モードに切り替え
+            toggleTableView();
+            
+            // ポジション番号をセット
+            document.getElementById('posTableSelect').value = position;
+            
+            // データをロード
+            loadPositionTable();
+        }
+        
+        window.onload = () => {
+            setupWebRTC();
+            loadCameraControls();
+            setInterval(updateGripperStatus, 2000);
+        };
+    </script>
+</body>
+</html>
