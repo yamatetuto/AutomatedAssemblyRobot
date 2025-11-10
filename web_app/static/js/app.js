@@ -500,12 +500,22 @@ function initCurrentChart() {
             scales: {
                 x: {
                     display: true,
-                    ticks: { color: '#aaa' },
+                    ticks: { 
+                        color: '#aaa',
+                        maxTicksLimit: 10,  // 最大10個のラベル表示
+                        autoSkip: true  // 自動的にラベルを間引く
+                    },
                     grid: { color: 'rgba(255, 255, 255, 0.1)' }
                 },
                 y: {
                     display: true,
-                    ticks: { color: '#aaa' },
+                    beginAtZero: true,
+                    min: 0,
+                    max: 500,  // 電流値の縦軸を0-500mAに固定
+                    ticks: { 
+                        color: '#aaa',
+                        stepSize: 100  // 100mA刻みで表示
+                    },
                     grid: { color: 'rgba(255, 255, 255, 0.1)' }
                 }
             },
@@ -519,7 +529,10 @@ function initCurrentChart() {
 function startCurrentMonitor() {
     if (currentMonitorInterval) return;
     
-    initCurrentChart();
+    // グラフが未初期化の場合のみ初期化
+    if (!currentChart) {
+        initCurrentChart();
+    }
     
     currentMonitorInterval = setInterval(async () => {
         try {
@@ -536,7 +549,8 @@ function startCurrentMonitor() {
                 currentChart.data.labels.push(timeLabel);
                 currentChart.data.datasets[0].data.push(data.current);
                 
-                if (currentChart.data.labels.length > 60) {
+                // 最大120データポイント（60秒分、500ms間隔）
+                if (currentChart.data.labels.length > 120) {
                     currentChart.data.labels.shift();
                     currentChart.data.datasets[0].data.shift();
                 }
@@ -557,7 +571,7 @@ function stopCurrentMonitor() {
 }
 
 // ===== 把持状態判定 =====
-async function checkGripStatus() {
+async function checkGripStatus(silent = false) {
     try {
         const response = await fetch('/api/gripper/grip_status');
         const data = await response.json();
@@ -591,13 +605,15 @@ async function checkGripStatus() {
         document.getElementById('gripReason').textContent = 
             reasonTexts[data.reason] || data.reason || '--';
         
-        // トースト通知
-        if (data.status === 'success') {
-            showToast('把持成功', 'success');
-        } else if (data.status === 'failure') {
-            showToast('把持失敗: ' + (reasonTexts[data.reason] || data.reason), 'error');
-        } else if (data.status === 'warning') {
-            showToast('警告: ' + (reasonTexts[data.reason] || data.reason), 'warning');
+        // トースト通知（silentモードでない場合のみ）
+        if (!silent) {
+            if (data.status === 'success') {
+                showToast('把持成功', 'success');
+            } else if (data.status === 'failure') {
+                showToast('把持失敗: ' + (reasonTexts[data.reason] || data.reason), 'error');
+            } else if (data.status === 'warning') {
+                showToast('警告: ' + (reasonTexts[data.reason] || data.reason), 'warning');
+            }
         }
         
     } catch (error) {
@@ -606,21 +622,53 @@ async function checkGripStatus() {
     }
 }
 
-// パネル展開時に電流値モニター開始（既存のtogglePanel関数を拡張）
+// ===== 把持状態判定の自動更新 =====
+let gripStatusInterval = null;
+
+function startGripStatusMonitor() {
+    if (gripStatusInterval) return;
+    
+    // 初回実行
+    checkGripStatus(true);  // silent=true
+    
+    // 3秒間隔で自動更新（silent=trueでトースト通知を抑制）
+    gripStatusInterval = setInterval(async () => {
+        await checkGripStatus(true);
+    }, 3000);  // 3秒間隔
+}
+
+function stopGripStatusMonitor() {
+    if (gripStatusInterval) {
+        clearInterval(gripStatusInterval);
+        gripStatusInterval = null;
+    }
+}
+
+// パネル展開時に電流値モニター・把持状態判定の自動更新開始
 const originalTogglePanel = togglePanel;
 togglePanel = function(panelId) {
     // 元の関数を実行
     originalTogglePanel(panelId);
     
-    // 電流値モニターパネルの場合
-    if (panelId === 'current') {
-        setTimeout(() => {
+    setTimeout(() => {
+        // 電流値モニターパネルの場合
+        if (panelId === 'current') {
             const body = document.getElementById('current-body');
             if (body && !body.classList.contains('collapsed')) {
                 startCurrentMonitor();
             } else {
                 stopCurrentMonitor();
             }
-        }, 100);
-    }
+        }
+        
+        // 把持状態判定パネルの場合
+        if (panelId === 'grip') {
+            const body = document.getElementById('grip-body');
+            if (body && !body.classList.contains('collapsed')) {
+                startGripStatusMonitor();
+            } else {
+                stopGripStatusMonitor();
+            }
+        }
+    }, 100);
 };

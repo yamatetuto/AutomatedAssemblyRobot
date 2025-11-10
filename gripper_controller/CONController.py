@@ -31,58 +31,12 @@ class CONController:
     # REG_EXT_STATUSのビット位置
     BIT_MOVE = 5               # MOVE (移動中信号)
 
-    def _calculate_timeout(self, baudrate, response_bytes, is_write=False):
-        """
-        Modbus RTU半二重通信のタイムアウト値を計算
-        
-        仕様:
-        Tout = To + α + (10 × Bprt / Kbr) [ms]
-        
-        Args:
-            baudrate: 通信速度 [bps]
-            response_bytes: レスポンスメッセージのバイト数
-            is_write: 書き込み処理の場合True（内部処理時間が異なる）
-        
-        Returns:
-            タイムアウト値 [秒]
-        """
-        # To: 内部処理時間 × 安全率3
-        if is_write:
-            To = 18 * 3  # 書き込み: 最大18ms × 安全率3
-        else:
-            To = 4 * 3   # 読み出し: 最大4ms × 安全率3
-        
-        # α: 従局トランスミッター活性化最小遅延時間（パラメータNo.17, 初期値5ms）
-        alpha = 5
-        
-        # Kbr: 通信速度 [kbps]
-        Kbr = baudrate / 1000
-        
-        # Bprt: レスポンスメッセージのバイト数 + 8
-        Bprt = response_bytes + 8
-        
-        # タイムアウト計算 [ms]
-        Tout_ms = To + alpha + (10 * Bprt / Kbr)
-        
-        # 秒に変換して返す（最小0.1秒、余裕を持って+0.1秒）
-        return max(0.1, (Tout_ms / 1000) + 0.1)
-
     def __init__(self, port, slave_address, baudrate):
         """コントローラの初期化と接続を行う。"""
         try:
             self.instrument = minimalmodbus.Instrument(port, slave_address)
             self.instrument.serial.baudrate = baudrate
-            
-            # Modbus RTU半二重通信のタイムアウト計算
-            # 読み出し用の標準的なレスポンス（レジスタ1個: 7バイト程度）
-            read_timeout = self._calculate_timeout(baudrate, response_bytes=7, is_write=False)
-            self.instrument.serial.timeout = read_timeout
-            
-            # ボーレートとタイムアウトを保存（後で書き込み時に使用）
-            self.baudrate = baudrate
-            self.read_timeout = read_timeout
-            self.write_timeout = self._calculate_timeout(baudrate, response_bytes=8, is_write=True)
-            
+            self.instrument.serial.timeout = 0.5
             self.instrument.mode = minimalmodbus.MODE_RTU
             self.instrument.clear_buffers_before_each_transaction = True
             # self.instrument.debug = True # 詳細なログが必要な場合はコメントを外す
@@ -108,12 +62,22 @@ class CONController:
         start_time = time.time()
         print("   ... (移動中信号が 0 になるのを待機中)")
         while True:
+            # ext_status = self.instrument.read_register(self.REG_EXT_STATUS, functioncode=3)
+            # # print(bin(ext_status)) # デバッグ用: 現在の拡張ステータスを表示
+            # if (ext_status >> self.BIT_MOVE) & 1 == 0:
+            #     print("   移動停止を確認。")
+            #     return True
+            # if time.time() - start_time > timeout:
+            #     print("   [Error] タイムアウトエラー: 移動が完了しませんでした。")
+            #     return False
+            # time.sleep(0.1)
             if self.check_status_bit(self.REG_EXT_STATUS, self.BIT_MOVE) == 0:
                 print("   移動停止を確認。")
                 return True
             if time.time() - start_time > timeout:
                 print("   [Error] タイムアウトエラー: 移動が完了しませんでした。")
                 return False
+            time.sleep(0.1)
 
     def wait_for_status_bit(self, register, bit_position, expected_state=1, timeout=15):
         """status bitの確認。"""
@@ -121,12 +85,22 @@ class CONController:
         # pdb.set_trace()  # デバッグ用ブレークポイント
         print(f"   ... (ビット {bit_position} が {expected_state} になるのを待機中)")
         while True:
+            # status = self.instrument.read_register(register, functioncode=3)
+            # current_state = (status >> bit_position) & 1
+            # if current_state == expected_state:
+            #     print(f"   ステータス確認完了 (ビット {bit_position} が {expected_state} になりました)")
+            #     return True
+            # if time.time() - start_time > timeout:
+            #     print(f"   [Error] タイムアウトエラー: ビット {bit_position} が {expected_state} になりませんでした。")
+            #     return False
+            # time.sleep(0.1)
             if self.check_status_bit(register, bit_position) == expected_state:
                 print(f"   ステータス確認完了 (ビット {bit_position} が {expected_state} になりました)")
                 return True
             if time.time() - start_time > timeout:
                 print(f"   [Error] タイムアウトエラー: ビット {bit_position} が {expected_state} になりませんでした。")
                 return False
+            time.sleep(0.1)
 
     def servo_on(self, timeout=10):
         """サーボをONにし、安定するまで待つ。"""
@@ -158,6 +132,12 @@ class CONController:
             print("   HEND信号を確認。原点復帰正常完了。")
         else:
             raise RuntimeError("[Error] 移動は停止しましたが、HEND信号がONになりませんでした。")
+        # status = self.instrument.read_register(self.REG_DEVICE_STATUS, functioncode=3)
+        # if (status >> self.BIT_HOME_END) & 1 == 1:
+        #     print("   HEND信号を確認。原点復帰正常完了。")
+        # else:
+        #     raise RuntimeError("エラー: 移動は停止しましたが、HEND信号がONになりませんでした。")
+
         
     def set_position_data(self, position_number:int, position_mm=None, width_mm=0.1, speed_mm_s=78.0, accel_g=0.30, decel_g=0.30, push_current_percent=0, push_direction=False):
         """
@@ -217,6 +197,7 @@ class CONController:
                 print(f"     - {key:<22}: {value}")
 
             print("   書き込み完了。")
+            time.sleep(0.1)
             return True
         except Exception as e:
             print(f"   [Error] ポジションデータの書き込みに失敗しました: {e}")
@@ -233,6 +214,12 @@ class CONController:
 
         if not self.wait_for_motion_to_stop(timeout):
              raise RuntimeError("[Error] 位置決め移動がタイムアウトしました。")
+
+        # # 念のためPENDビットも確認
+        # if self.wait_for_status_bit(self.REG_DEVICE_STATUS, self.BIT_POS_END):
+        #     print("    信号を確認。原点復帰正常完了。")
+        # else:
+        #     raise RuntimeError("[Error] 移動は停止しましたが、HEND信号がONになりませんでした。")
 
     def get_position_data(self, position_number):
         """
@@ -311,10 +298,8 @@ class CONController:
         print("\n4d. 押付け空振り状態を確認します...")
         if self.check_status_bit(self.REG_DEVICE_STATUS, self.BIT_PUSH_MISS):
             print("   押付け空振り状態: 発生中 (PSFL=1)")
-            return True
         else:
             print("   押付け空振り状態: 発生していません (PSFL=0)")
-            return False
 
     # PCON-CBP, SCON-CA/CBなど、ロードセル対応機種専用の機能
     def get_load_N(self):
