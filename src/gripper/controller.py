@@ -400,7 +400,7 @@ if __name__ == "__main__":
         # 状態の読み出し
         # controller.get_current_alarm()
 
-        # controller.home()
+        controller.home()
         # controller.get_current_mA()
 
 

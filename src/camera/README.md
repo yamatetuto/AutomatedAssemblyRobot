@@ -240,3 +240,66 @@ pip install pyrealsense2 numpy
 
 **最終更新**: 2025-11-10  
 **バージョン**: v1.0
+
+## ユニバーサルv4l2サポート (2025-11-12追加)
+
+### 概要
+すべてのv4l2対応カメラで利用可能な全コントロール型をサポートします。
+
+### サポートする型
+- **int**: 整数値（例: brightness, contrast）
+- **int64**: 64ビット整数値
+- **bool**: ブール値（例: auto_exposure）
+- **menu**: 選択肢（例: exposure_auto）
+- **button**: ボタン（例: reset）
+- **bitmask**: ビットマスク
+
+### 機能
+
+#### 動的コントロール検出
+```python
+controls = camera_manager.get_controls()
+# {
+#   "brightness": {"type": "int", "min": 0, "max": 255, "default": 128, ...},
+#   "exposure_auto": {"type": "menu", "options": [{"value": 0, "name": "Auto"}, ...]}
+# }
+```
+
+#### コントロール設定
+```python
+# 整数値
+camera_manager.set_control("brightness", 200)
+
+# メニュー（値で指定）
+camera_manager.set_control("exposure_auto", 1)
+
+# ブール値
+camera_manager.set_control("auto_white_balance", 0)
+```
+
+#### バリデーション
+- コントロールの存在確認
+- フラグチェック（inactive/disabled/grabbed）
+- 値の範囲検証（min/max）
+- 読み取り専用チェック
+
+#### リセット機能
+```python
+# 個別リセット
+camera_manager.reset_control("brightness")
+
+# 一括リセット（inactive/disabled/buttonは自動スキップ）
+results = camera_manager.reset_all_controls()
+# {"brightness": True, "contrast": True, "reset_button": False, ...}
+```
+
+### API エンドポイント
+- `GET /api/camera/controls`: 全コントロール取得
+- `POST /api/camera/control/{name}/{value}`: コントロール設定
+- `POST /api/camera/control/reset/{name}`: 個別リセット
+- `POST /api/camera/controls/reset_all`: 一括リセット
+
+### 対応カメラ例
+- Raspberry Pi Camera Module (v1/v2/v3)
+- USB Webカメラ（UVC対応）
+- 産業用カメラ（v4l2対応）

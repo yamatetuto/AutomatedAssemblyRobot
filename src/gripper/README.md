@@ -446,3 +446,45 @@ sudo usermod -a -G dialout $USER
 sudo apt-get install python3-serial
 python3 -m serial.tools.miniterm /dev/ttyUSB0 38400
 ```
+
+## キャッシュ機能 (2025-11-12追加)
+
+### 概要
+電流値と位置をバックグラウンドタスクで定期的に取得し、キャッシュすることで、Modbus通信の重複を削減します。
+
+### 仕様
+- **更新間隔**: 200ms
+- **キャッシュ有効期限**: デフォルト1秒（メソッドにより調整可能）
+- **自動起動**: `connect()`成功時に自動的にモニタータスクを開始
+- **自動停止**: `disconnect()`時に自動的にモニタータスクを停止
+
+### 使用方法
+
+#### キャッシュ値の取得
+```python
+# 電流値（1秒以内のキャッシュ）
+current = await gripper_manager.get_cached_current(max_age=1.0)
+if current is not None:
+    print(f"電流値: {current} mA")
+else:
+    print("キャッシュが古い、または未取得")
+
+# 位置（0.5秒以内のキャッシュ）
+position = await gripper_manager.get_cached_position(max_age=0.5)
+if position is not None:
+    print(f"位置: {position} mm")
+```
+
+#### 自動キャッシュ使用メソッド
+以下のメソッドは自動的にキャッシュを優先使用します：
+- `get_current()`: 1秒以内のキャッシュがあれば使用、なければ直接取得
+- `check_grip_status()`: 0.5秒以内のキャッシュを優先使用
+
+### メリット
+- **通信負荷削減**: Modbus通信回数を大幅に削減
+- **応答速度向上**: キャッシュヒット時は即座に応答
+- **リアルタイム性**: 200ms間隔で自動更新されるため、十分な鮮度を維持
+
+### 注意事項
+- バックグラウンドタスクが動作している間はModbus通信が定期的に発生します
+- キャッシュを無視して最新値を取得したい場合は、`controller.get_current_mA()`を直接呼び出してください
