@@ -202,6 +202,40 @@ async def set_camera_control(name: str, value: int):
         raise HTTPException(status_code=400, detail=str(e))
 
 
+@app.post("/api/camera/control/reset/{name}")
+async def reset_camera_control(name: str):
+    """カメラコントロールをデフォルト値にリセット"""
+    if not camera_manager or not camera_manager.is_opened():
+        raise HTTPException(status_code=503, detail="カメラが接続されていません")
+    
+    try:
+        camera_manager.reset_control(name)
+        return {"status": "ok", "name": name, "message": f"{name}をデフォルト値にリセットしました"}
+    except Exception as e:
+        logger.error(f"カメラコントロールリセットエラー: {e}")
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.post("/api/camera/controls/reset_all")
+async def reset_all_camera_controls():
+    """すべてのカメラコントロールをデフォルト値にリセット"""
+    if not camera_manager or not camera_manager.is_opened():
+        raise HTTPException(status_code=503, detail="カメラが接続されていません")
+    
+    try:
+        results = camera_manager.reset_all_controls()
+        success_count = sum(results.values())
+        total_count = len(results)
+        return {
+            "status": "ok",
+            "message": f"{success_count}/{total_count}個のコントロールをリセットしました",
+            "results": results
+        }
+    except Exception as e:
+        logger.error(f"カメラコントロール一括リセットエラー: {e}")
+        raise HTTPException(status_code=400, detail=str(e))
+
+
 @app.post("/api/camera/snapshot")
 async def take_snapshot():
     """スナップショット撮影"""

@@ -502,8 +502,17 @@ function initCurrentChart() {
                     display: true,
                     ticks: { 
                         color: '#aaa',
-                        maxTicksLimit: 10,  // 最大10個のラベル表示
-                        autoSkip: true  // 自動的にラベルを間引く
+                        maxTicksLimit: 6,  // 最大6個のラベル表示（10秒間隔）
+                        autoSkip: true,  // 自動的にラベルを間引く
+                        callback: function(value, index, ticks) {
+                            // 10秒（20ポイント）ごとにラベル表示
+                            const label = this.getLabelForValue(value);
+                            const seconds = parseFloat(label);
+                            if (seconds % 10 === 0) {
+                                return label;
+                            }
+                            return '';
+                        }
                     },
                     grid: { color: 'rgba(255, 255, 255, 0.1)' }
                 },
@@ -534,18 +543,20 @@ function startCurrentMonitor() {
         initCurrentChart();
     }
     
+    let dataPointIndex = 0;
+    
     currentMonitorInterval = setInterval(async () => {
         try {
             const response = await fetch('/api/gripper/current');
             const data = await response.json();
             
             if (data.status === 'ok') {
-                const now = new Date();
-                const timeLabel = now.toLocaleTimeString();
-                
                 document.getElementById('currentValue').textContent = data.current;
                 
-                // グラフ更新（最大60データポイント）
+                // ラベルは相対時間（秒）を使用
+                const timeLabel = (dataPointIndex * 0.5).toFixed(1) + 's';
+                
+                // グラフ更新
                 currentChart.data.labels.push(timeLabel);
                 currentChart.data.datasets[0].data.push(data.current);
                 
@@ -555,6 +566,7 @@ function startCurrentMonitor() {
                     currentChart.data.datasets[0].data.shift();
                 }
                 
+                dataPointIndex++;
                 currentChart.update('none'); // アニメーションなしで更新
             }
         } catch (error) {

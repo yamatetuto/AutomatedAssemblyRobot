@@ -249,12 +249,9 @@ class GripperManager:
             raise RuntimeError("グリッパーが接続されていません")
         
         try:
-            # 電流値レジスタ (0x900C) から読み取り（リトライ付き）
+            # controller.get_current_mA()を使用（リトライ付き）
             current = await self._modbus_read_with_retry(
-                self.controller.instrument.read_register,
-                0x900C,
-                functioncode=3,
-                signed=True
+                self.controller.get_current_mA
             )
             return current
         except Exception as e:
@@ -283,29 +280,21 @@ class GripperManager:
         
         async with self._modbus_lock:
             try:
-                # ステータス読み取り
-                status_dss1 = await asyncio.to_thread(
-                    self.controller.instrument.read_register,
-                    0x9005,
-                    functioncode=3
+                # MOVEビット（移動中信号）をcontroller.check_status_bitで確認
+                move = await asyncio.to_thread(
+                    self.controller.check_status_bit,
+                    self.controller.REG_EXT_STATUS,
+                    self.controller.BIT_MOVE
                 )
-
+                move = bool(move)
+                
+                # PSFL（押付け空振りフラグ）をcontroller.check_status_bitで確認
                 psfl = await asyncio.to_thread(
                     self.controller.check_status_bit,
                     self.controller.REG_DEVICE_STATUS,
-                    self.BIT_PUSH_MISS
+                    self.controller.BIT_PUSH_MISS
                 )
-                
-                # ビット抽出（DSS1レジスタから）
-                psfl = bool((status_dss1 >> 11) & 0x1)  # 押付け空振りフラグ
-                
-                # 拡張ステータス（DSSE）を読み取って移動中フラグを確認
-                status_dsse = await asyncio.to_thread(
-                    self.controller.instrument.read_register,
-                    0x9007,  # 拡張デバイスステータスレジスタ (DSSE)
-                    functioncode=3
-                )
-                move = bool((status_dsse >> 5) & 0x1)  # MOVEビット（移動中信号）
+                psfl = bool(psfl)
                 
                 # 移動中チェック（MOVEビットで判定）
                 if move:
@@ -318,16 +307,15 @@ class GripperManager:
                         "confidence": "high"
                     }
                 
-                # 電流値読み取り（直接読み取り - ロック内なのでget_current()を呼ばない）
+                # 電流値読み取り（controller.get_current_mA()を使用）
                 current = await asyncio.to_thread(
                     self.controller.get_current_mA
                 )
                 
-                # 現在位置読み取り
-                position_raw = await asyncio.to_thread(
+                # 現在位置読み取り（controller.get_current_position()を使用、既にmm単位）
+                position_mm = await asyncio.to_thread(
                     self.controller.get_current_position
                 )
-                position_mm = position_raw * 0.01
                 
                 # 空振りフラグチェック（最優先）
                 if psfl:
