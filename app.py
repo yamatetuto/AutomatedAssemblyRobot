@@ -303,22 +303,21 @@ async def set_camera_resolution(request: dict):
     try:
         width = request.get("width")
         height = request.get("height")
+        fps = request.get("fps", camera_manager.settings.get("fps", 30))
         
         if width and height:
-            await camera_manager.stop()
-            camera_manager.set_resolution(width, height)
-            await camera_manager.start()
+            # update_settings()が内部でstop/startを実行
+            await camera_manager.update_settings(width, height, fps)
             
             return {
                 "status": "ok",
-                "message": f"解像度を{width}x{height}に変更しました",
+                "message": f"解像度を{width}x{height}@{fps}fpsに変更しました",
                 "settings": camera_manager.settings
             }
         else:
             raise HTTPException(status_code=400, detail="widthとheightが必要です")
     except Exception as e:
         logger.error(f"解像度変更エラー: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/camera/codec")
