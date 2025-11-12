@@ -87,6 +87,12 @@ class GripperManager:
         self._modbus_lock = asyncio.Lock()  # Modbus通信の排他制御
         self.controller: Optional[CONController] = None
         self.is_connected = False
+        
+        # キャッシュ用変数（定期的にバックグラウンドで更新）
+        self._cached_current: Optional[int] = None  # 電流値 (mA)
+        self._cached_position: Optional[float] = None  # 位置 (mm)
+        self._cache_timestamp: float = 0  # キャッシュ更新時刻
+        self._monitor_task: Optional[asyncio.Task] = None  # モニタータスク
     
     async def connect(self):
         """グリッパーに接続"""
@@ -103,6 +109,7 @@ class GripperManager:
             )
             self.is_connected = True
             logger.info(f"✅ グリッパー接続成功: {GRIPPER_PORT}")
+            await self._start_monitor()
             return True
         except Exception as e:
             logger.error(f"グリッパー接続失敗: {e}")
@@ -112,6 +119,7 @@ class GripperManager:
     
     async def disconnect(self):
         """グリッパーから切断"""
+        await self._stop_monitor()
         if self.controller:
             try:
                 self.controller.close()
@@ -122,6 +130,54 @@ class GripperManager:
         self.controller = None
         self.is_connected = False
     
+
+    async def _monitor_loop(self):
+        """バックグラウンドで電流値と位置を定期的に更新"""
+        logger.info("グリッパーモニタータスクを開始")
+        try:
+            while self.is_connected:
+                try:
+                    # 電流値を取得
+                    current = await self._modbus_read_with_retry(
+                        self.controller.get_current_mA
+                    )
+                    # 位置を取得
+                    position = await self._modbus_read_with_retry(
+                        self.controller.get_current_position
+                    )
+                    
+                    # キャッシュを更新
+                    self._cached_current = current
+                    self._cached_position = position
+                    self._cache_timestamp = time.time()
+                    
+                except Exception as e:
+                    logger.warning(f"モニター更新エラー: {e}")
+                
+                # 200ms待機
+                await asyncio.sleep(0.2)
+        except asyncio.CancelledError:
+            logger.info("グリッパーモニタータスクをキャンセル")
+        except Exception as e:
+            logger.error(f"モニタータスクエラー: {e}")
+    
+    async def _start_monitor(self):
+        """モニタータスクを開始"""
+        if self._monitor_task is None or self._monitor_task.done():
+            self._monitor_task = asyncio.create_task(self._monitor_loop())
+            logger.info("グリッパーモニターを開始しました")
+    
+    async def _stop_monitor(self):
+        """モニタータスクを停止"""
+        if self._monitor_task and not self._monitor_task.done():
+            self._monitor_task.cancel()
+            try:
+                await self._monitor_task
+            except asyncio.CancelledError:
+                pass
+            self._monitor_task = None
+            logger.info("グリッパーモニターを停止しました")
+
     async def get_status(self) -> Dict:
         """グリッパーステータスを取得（非同期読み取り、ロック使用）"""
         if not self.is_connected or not self.controller:
@@ -243,13 +299,52 @@ class GripperManager:
             )
         logger.info(f"ポジション{position_number}のデータを更新")
     
+    async def get_cached_current(self, max_age: float = 1.0) -> Optional[int]:
+        """
+        キャッシュされた電流値を取得（max_age秒以内のキャッシュ）
+        
+        Args:
+            max_age: キャッシュの有効期限（秒）。デフォルト1秒
+        
+        Returns:
+            電流値 (mA)。キャッシュが古い場合はNone
+        """
+        import time
+        if self._cached_current is not None:
+            age = time.time() - self._cache_timestamp
+            if age <= max_age:
+                return self._cached_current
+        return None
+    
+    async def get_cached_position(self, max_age: float = 1.0) -> Optional[float]:
+        """
+        キャッシュされた位置を取得（max_age秒以内のキャッシュ）
+        
+        Args:
+            max_age: キャッシュの有効期限（秒）。デフォルト1秒
+        
+        Returns:
+            位置 (mm)。キャッシュが古い場合はNone
+        """
+        import time
+        if self._cached_position is not None:
+            age = time.time() - self._cache_timestamp
+            if age <= max_age:
+                return self._cached_position
+        return None
+    
     async def get_current(self) -> int:
-        """電流値を取得（リトライ付き）"""
+        """電流値を取得（キャッシュ優先、古い場合は再取得）"""
         if not self.is_connected or not self.controller:
             raise RuntimeError("グリッパーが接続されていません")
         
+        # キャッシュ確認（1秒以内）
+        cached = await self.get_cached_current(max_age=1.0)
+        if cached is not None:
+            return cached
+        
+        # キャッシュが古い場合は直接取得
         try:
-            # controller.get_current_mA()を使用（リトライ付き）
             current = await self._modbus_read_with_retry(
                 self.controller.get_current_mA
             )
@@ -257,7 +352,7 @@ class GripperManager:
         except Exception as e:
             logger.error(f"電流値取得エラー: {e}")
             raise
-    
+
     async def check_grip_status(self, target_position: Optional[int] = None) -> Dict:
         """
         把持状態を判定
@@ -280,6 +375,18 @@ class GripperManager:
         
         async with self._modbus_lock:
             try:
+                # 電流値読み取り（キャッシュ優先）
+                cached_current = await self.get_cached_current(max_age=0.5)
+                current = cached_current if cached_current is not None else await asyncio.to_thread(
+                    self.controller.get_current_mA
+                )
+                
+                # 現在位置読み取り（キャッシュ優先、既にmm単位）
+                cached_position = await self.get_cached_position(max_age=0.5)
+                position_mm = cached_position if cached_position is not None else await asyncio.to_thread(
+                    self.controller.get_current_position
+                )
+                
                 # MOVEビット（移動中信号）をcontroller.check_status_bitで確認
                 move = await asyncio.to_thread(
                     self.controller.check_status_bit,
@@ -306,16 +413,6 @@ class GripperManager:
                         "psfl": False,
                         "confidence": "high"
                     }
-                
-                # 電流値読み取り（controller.get_current_mA()を使用）
-                current = await asyncio.to_thread(
-                    self.controller.get_current_mA
-                )
-                
-                # 現在位置読み取り（controller.get_current_position()を使用、既にmm単位）
-                position_mm = await asyncio.to_thread(
-                    self.controller.get_current_position
-                )
                 
                 # 空振りフラグチェック（最優先）
                 if psfl:

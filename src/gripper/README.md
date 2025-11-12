@@ -201,3 +201,248 @@ export GRIPPER_SLAVE_ADDR=1
 
 **最終更新**: 2025-11-10  
 **バージョン**: v2.3
+
+## デバッグ方法
+
+### ターミナルから直接Modbusレジスタを確認する
+
+#### 1. controller.pyを単体実行
+
+```bash
+cd /home/pi/assembly/AutomatedAssemblyRobot
+python3 src/gripper/controller.py
+```
+
+デフォルトでは以下の動作を実行します:
+- アラームコード確認
+- ポジションテーブルNo.1のデータ読み出し
+
+#### 2. カスタムデバッグスクリプトの作成
+
+現在の電流値、位置、ステータスを確認:
+
+```python
+#!/usr/bin/env python3
+from src.gripper.controller import CONController
+
+PORT = '/dev/ttyUSB0'
+SLAVE_ID = 1
+BAUD = 38400
+
+controller = CONController(PORT, SLAVE_ID, BAUD)
+
+try:
+    # 現在位置を取得
+    position = controller.get_current_position()
+    
+    # 電流値を取得
+    current = controller.get_current_mA()
+    
+    # アラームを確認
+    alarm = controller.get_current_alarm()
+    
+    # サーボON状態を確認
+    servo_on = controller.check_status_bit(
+        controller.REG_DEVICE_STATUS,
+        controller.BIT_SERVO_READY
+    )
+    
+    # 移動中かどうかを確認
+    moving = controller.check_status_bit(
+        controller.REG_EXT_STATUS,
+        controller.BIT_MOVE
+    )
+    
+    # 押付け空振りフラグを確認
+    psfl = controller.check_status_bit(
+        controller.REG_DEVICE_STATUS,
+        controller.BIT_PUSH_MISS
+    )
+    
+    print("\n" + "=" * 60)
+    print("グリッパーステータス")
+    print("=" * 60)
+    print(f"現在位置: {position} mm")
+    print(f"電流値: {current} mA")
+    print(f"アラーム: {alarm}")
+    print(f"サーボON: {servo_on}")
+    print(f"移動中: {moving}")
+    print(f"押付け空振り: {psfl}")
+    
+finally:
+    controller.close()
+```
+
+保存して実行:
+```bash
+python3 debug_gripper.py
+```
+
+#### 3. ポジションテーブルの内容を確認
+
+```python
+#!/usr/bin/env python3
+from src.gripper.controller import CONController
+
+controller = CONController('/dev/ttyUSB0', 1, 38400)
+
+try:
+    # ポジション0〜5のデータを確認
+    for i in range(6):
+        print(f"\n{'=' * 60}")
+        print(f"ポジションNo.{i}")
+        print('=' * 60)
+        data = controller.get_position_data(i)
+        
+        if data:
+            # 制御フラグをビット解析
+            ctl_flag = int(data['control_flag_hex'], 16)
+            print(f"\n制御フラグ解析 ({data['control_flag_hex']}):")
+            print(f"  ビット1 (押付け有効): {(ctl_flag >> 1) & 1}")
+            print(f"  ビット2 (押付け方向): {(ctl_flag >> 2) & 1}  # 0=プラス, 1=マイナス")
+            
+finally:
+    controller.close()
+```
+
+#### 4. リアルタイムモニタリング
+
+電流値と位置を連続監視:
+
+```python
+#!/usr/bin/env python3
+import time
+from src.gripper.controller import CONController
+
+controller = CONController('/dev/ttyUSB0', 1, 38400)
+
+try:
+    print("リアルタイムモニター開始 (Ctrl+Cで終了)")
+    print("時刻\t\t位置[mm]\t電流[mA]\t移動中")
+    print("-" * 60)
+    
+    while True:
+        pos = controller.get_current_position()
+        current = controller.get_current_mA()
+        moving = controller.check_status_bit(
+            controller.REG_EXT_STATUS,
+            controller.BIT_MOVE
+        )
+        
+        timestamp = time.strftime("%H:%M:%S")
+        print(f"{timestamp}\t{pos:.2f}\t\t{current}\t\t{moving}")
+        
+        time.sleep(0.5)  # 0.5秒間隔
+        
+except KeyboardInterrupt:
+    print("\nモニター終了")
+finally:
+    controller.close()
+```
+
+#### 5. 押付け動作のデバッグ
+
+押付け動作のデータ設定を確認:
+
+```python
+#!/usr/bin/env python3
+from src.gripper.controller import CONController
+
+controller = CONController('/dev/ttyUSB0', 1, 38400)
+
+try:
+    pos_no = 1
+    
+    print("設定前のデータ:")
+    controller.get_position_data(pos_no)
+    
+    print("\n押付け動作用データを設定:")
+    controller.set_position_data(
+        position_number=pos_no,
+        position_mm=2.0,           # 目標位置
+        width_mm=0.5,              # 押付け幅
+        speed_mm_s=5.0,            # 速度
+        push_current_percent=50,   # 押付け電流
+        push_direction=False       # False=プラス方向（閉じる）
+    )
+    
+    print("\n設定後のデータ:")
+    data = controller.get_position_data(pos_no)
+    
+    # ビット解析
+    ctl_flag = int(data['control_flag_hex'], 16)
+    print(f"\n制御フラグ詳細:")
+    print(f"  Raw値: {data['control_flag_hex']} (10進数: {ctl_flag})")
+    print(f"  2進数: {ctl_flag:04b}")
+    print(f"  ビット1 (押付け有効): {(ctl_flag >> 1) & 1}")
+    print(f"  ビット2 (押付け方向): {(ctl_flag >> 2) & 1}")
+    
+finally:
+    controller.close()
+```
+
+### Python debugger (pdb) の使用
+
+controller.pyのコードに以下を追加してブレークポイントを設定:
+
+```python
+import pdb
+pdb.set_trace()  # ここで実行が停止
+```
+
+pdbコマンド:
+- `n` (next): 次の行を実行
+- `s` (step): 関数の中に入る
+- `c` (continue): 次のブレークポイントまで実行
+- `p 変数名`: 変数の値を表示
+- `l` (list): 現在の位置のコードを表示
+- `q` (quit): デバッガーを終了
+
+例:
+```python
+def get_current_mA(self):
+    import pdb; pdb.set_trace()  # デバッグ開始
+    current_raw = self.instrument.read_long(...)
+    print(f"電流値: {current_raw}")
+    return current_raw
+```
+
+実行すると:
+```bash
+> /home/pi/.../controller.py(292)get_current_mA()
+-> current_raw = self.instrument.read_long(...)
+(Pdb) n  # 次の行へ
+(Pdb) p current_raw  # 変数の値を表示
+150
+(Pdb) c  # 続行
+```
+
+### minimalmodbusのデバッグモード
+
+controller.pyで詳細なModbus通信ログを有効化:
+
+```python
+def __init__(self, port, slave_address, baudrate):
+    # ...
+    self.instrument.debug = True  # ← コメントを外す
+```
+
+これにより、送受信される生のModbusフレームが表示されます。
+
+### 通信エラーの診断
+
+```bash
+# シリアルポートの確認
+ls -l /dev/ttyUSB*
+
+# 権限の確認
+groups  # dialoutグループに所属しているか確認
+
+# グループに追加（必要な場合）
+sudo usermod -a -G dialout $USER
+# ログアウト/ログインが必要
+
+# Modbusツールで通信テスト
+sudo apt-get install python3-serial
+python3 -m serial.tools.miniterm /dev/ttyUSB0 38400
+```

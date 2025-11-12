@@ -159,7 +159,7 @@ class CONController:
         else:
             raise RuntimeError("[Error] 移動は停止しましたが、HEND信号がONになりませんでした。")
         
-    def set_position_data(self, position_number:int, position_mm=None, width_mm=0.1, speed_mm_s=78.0, accel_g=0.30, decel_g=0.30, push_current_percent=0, push_direction=False):
+    def set_position_data(self, position_number:int, position_mm=None, width_mm=0.1, speed_mm_s=78.0, accel_g=0.30, decel_g=0.30, push_current_percent=0, is_closing_push=True):
         """
         指定したポジション番号のテーブルデータを書き換える。(資料 p.227)
         """
@@ -167,19 +167,20 @@ class CONController:
             if val is None or not (minv <= val <= maxv):
                 raise ValueError(f"[{label}]は {minv} から {maxv} の範囲で指定してください。")
         
+        # push_current_percentが0以外なら押し付け移動
         is_push_move = (push_current_percent != 0)
         validate_range(position_number, 0, 63, "ポジションNo.")
         validate_range(position_mm, 0.0, 4.0, "目標位置")
         if is_push_move:
             validate_range(width_mm, 0.0, 4.0, "押付け幅")
-            if (not push_direction and position_mm + width_mm > 4.0) or (push_direction and position_mm - width_mm < 0.0):
+            if (is_closing_push and position_mm + width_mm > 4.0) or (not is_closing_push and position_mm - width_mm < 0.0):
                 raise ValueError("押し付け移動では[目標位置]と[位置決め幅]合わせて 0.0 から 4.0 mm の範囲内になるようwidth_mm を指定してください。")
             validate_range(push_current_percent, 20, 70, "押付け")
             validate_range(speed_mm_s, 2.0, 5.0, "速度")
         else:
             validate_range(width_mm, 0.0, 0.5, "位置決め幅")
             validate_range(speed_mm_s, 5.0, 78.0, "速度")
-            push_direction = False
+            is_closing_push = True
 
         validate_range(accel_g, 0.01, 0.3, "加速度")
         validate_range(decel_g, 0.01, 0.3, "減速度")
@@ -196,11 +197,34 @@ class CONController:
             # 押付け電流
             push_val = int(255 * push_current_percent / 100) if is_push_move else 0
             self.instrument.write_register(base_addr + 12, push_val)
-            # 制御フラグ
-            ctl_flag = 0b0000
+            # # 制御フラグ
+            # ctl_flag = 0b0000
+            # if is_push_move:
+            #     ctl_flag = 0b0010 if not is_closing_push else 0b0110
+            # self.instrument.write_register(base_addr + 14, ctl_flag)
+            # 1. 現在のCTLFレジスタの値を読み出す (オフセット+14)
+            current_ctlf = self.instrument.read_register(base_addr + 14, functioncode=3)
+            new_ctlf = current_ctlf
+            # 2. 変更したいビットだけを操作する
             if is_push_move:
-                ctl_flag = 0b0010 if not push_direction else 0b0110
-            self.instrument.write_register(base_addr + 14, ctl_flag)
+                # PUSHビット(ビット1)をONにする
+                new_ctlf = new_ctlf | 0b0010
+                # is_closing_pushがTrueならグリッパ閉じる
+                if is_closing_push:
+                    # DIRビット(ビット2)もONにする
+                    new_ctlf = new_ctlf | 0b0100
+                else:
+                    # DIRビット(ビット2)をOFFにする
+                    new_ctlf = new_ctlf & ~0b0100
+            else:
+                # PUSHとDIRビットをOFFにする
+                new_ctlf = new_ctlf & ~0b0110
+
+            # 3. 変更後の値を書き戻す
+            self.instrument.write_register(base_addr + 14, new_ctlf)
+            
+            # 変数 ctl_flag を new_ctlf に変更
+            ctl_flag = new_ctlf
 
             # 設定値を辞書でまとめて表示
             pos_data = {
@@ -350,22 +374,26 @@ if __name__ == "__main__":
         controller.get_current_alarm()
         
         # ポジションテーブルの内容を確認
-        # controller.get_position_data(0)
+        controller.get_position_data(0)
         controller.get_position_data(1)
         # controller.get_position_data(2)
+        # controller.get_position_data(3)
+
 
         # 一連の動作を実行
-        # controller.servo_on()
-        # controller.home()
+        controller.servo_on()
+        controller.home()
         # controller.get_current_mA()
 
         # controller.move_to_pos(1)
         # controller.get_current_alarm()
         # controller.get_current_position()
         # controller.get_push_detect()
-        controller.set_position_data(position_number=1, position_mm=2.0, speed_mm_s=5.0, push_current_percent=50)
+        controller.set_position_data(position_number=1, position_mm=3.0, width_mm=0.9, speed_mm_s=5.0, push_current_percent=50)
         controller.get_position_data(1)
-        # controller.move_to_pos(1)
+        controller.move_to_pos(1)
+        controller.get_current_position()
+
         # controller.get_current_mA()
         # controller.get_load_N()
 
