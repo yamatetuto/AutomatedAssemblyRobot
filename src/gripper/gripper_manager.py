@@ -120,6 +120,22 @@ class GripperManager:
     async def disconnect(self):
         """グリッパーから切断"""
         await self._stop_monitor()
+        
+        # サーボがONの場合はOFFにする
+        if self.controller and self.is_connected:
+            try:
+                servo_on = await asyncio.to_thread(
+                    self.controller.check_status_bit,
+                    self.controller.REG_DEVICE_STATUS,
+                    self.controller.BIT_SERVO_READY
+                )
+                if servo_on:
+                    logger.info("サーボOFFにしています...")
+                    await asyncio.to_thread(self.controller.servo_off)
+                    logger.info("サーボOFF完了")
+            except Exception as e:
+                logger.warning(f"サーボOFF処理エラー: {e}")
+        
         if self.controller:
             try:
                 self.controller.close()
