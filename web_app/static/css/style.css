@@ -20,26 +20,45 @@ body {
     margin: 0;
 }
 
+/* 3カラムレイアウト */
 .main-container {
     display: flex;
     height: calc(100vh - 70px);
+    gap: 15px;
+    padding: 15px 20px 20px;
 }
 
-.left-panel {
-    width: 70%;
-    padding: 20px;
+.main-container.three-column {
+    display: flex;
+}
+
+.main-container .column {
     display: flex;
     flex-direction: column;
+    gap: 15px;
+    min-height: 0;
+}
+
+.video-column {
+    flex: 5;
+    min-width: 0;
+}
+
+.monitor-column {
+    flex: 2.5;
+    min-width: 0;
+}
+
+.control-column {
+    flex: 2.5;
+    min-width: 0;
+    background: #16213e;
+    border-left: 2px solid #00d4ff;
+    padding: 20px;
     overflow-y: auto;
 }
 
-.right-panel {
-    width: 30%;
-    padding: 20px;
-    background: #16213e;
-    border-left: 2px solid #00d4ff;
-    overflow-y: auto;
-}
+
 
 .panel {
     background: #16213e;
@@ -454,4 +473,227 @@ button.success {
     color: #00d4ff;
     font-weight: bold;
     font-size: 1.1em;
+}
+/* モニターカード */
+.monitor-card {
+    background: #16213e;
+    border-radius: 12px;
+    border: 2px solid rgba(0, 212, 255, 0.2);
+    box-shadow: 0 8px 30px rgba(0, 0, 0, 0.45);
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    flex: 1;
+}
+
+.monitor-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 18px;
+    background: linear-gradient(135deg, #0f3460 0%, #533483 100%);
+    border-bottom: 1px solid rgba(0, 212, 255, 0.2);
+}
+
+.monitor-header h2 {
+    margin: 0;
+    font-size: 1.1em;
+    color: #00d4ff;
+}
+
+.monitor-value {
+    font-size: 1.8em;
+    font-weight: 700;
+    color: #00d4ff;
+    display: flex;
+    align-items: flex-end;
+    gap: 6px;
+}
+
+.monitor-value .unit {
+    font-size: 0.5em;
+    color: #aaa;
+}
+
+.monitor-body {
+    padding: 15px;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+}
+
+.monitor-body canvas {
+    width: 100% !important;
+    height: 100% !important;
+}
+
+/* プリンター制御UI */
+.printer-status {
+    background: rgba(0, 212, 255, 0.08);
+    border: 1px solid rgba(0, 212, 255, 0.3);
+    border-radius: 10px;
+    padding: 12px;
+    margin-bottom: 15px;
+}
+
+.status-row {
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.95em;
+    margin-bottom: 6px;
+}
+
+.status-row span:last-child {
+    font-weight: 700;
+    color: #00d4ff;
+}
+
+.status-row.temps {
+    gap: 12px;
+}
+
+.status-row.temps > div {
+    flex: 1;
+}
+
+.progress-wrapper {
+    margin-top: 10px;
+}
+
+.progress-bar {
+    width: 100%;
+    height: 12px;
+    border-radius: 999px;
+    background: #0f3460;
+    overflow: hidden;
+    border: 1px solid #00d4ff;
+}
+
+.progress-fill {
+    height: 100%;
+    width: 0;
+    background: linear-gradient(90deg, #27ae60, #00d4ff);
+    transition: width 0.3s ease;
+}
+
+.progress-meta {
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.85em;
+    margin-top: 4px;
+    color: #aaa;
+}
+
+.file-picker {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    margin-bottom: 12px;
+}
+
+.file-picker select {
+    flex: 1;
+}
+
+.button-row.tight {
+    gap: 6px;
+}
+
+.button-row.tight button {
+    min-width: 0;
+    flex: 1 1 auto;
+}
+
+button.danger {
+    background: linear-gradient(135deg, #ff416c 0%, #ff4b2b 100%);
+}
+
+.printer-macro-section {
+    margin-top: 15px;
+}
+
+.section-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 12px;
+}
+
+.section-header h3 {
+    margin: 0;
+    font-size: 1em;
+    color: #00d4ff;
+}
+
+.macro-list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    max-height: 220px;
+    overflow-y: auto;
+}
+
+.macro-item {
+    border: 1px solid rgba(0, 212, 255, 0.3);
+    border-radius: 8px;
+    padding: 10px;
+    background: rgba(15, 52, 96, 0.5);
+}
+
+.macro-item-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 6px;
+    font-weight: 600;
+}
+
+.macro-item-buttons {
+    display: flex;
+    gap: 6px;
+}
+
+.macro-item-buttons button {
+    flex: 1;
+    min-width: 70px;
+    padding: 4px 8px;
+    font-size: 0.85em;
+}
+
+.macro-commands {
+    font-family: 'Fira Code', 'Courier New', monospace;
+    font-size: 0.85em;
+    background: rgba(0, 0, 0, 0.2);
+    padding: 8px;
+    border-radius: 6px;
+    line-height: 1.4;
+    white-space: pre-line;
+    color: #ccc;
+}
+
+.macro-form textarea {
+    min-height: 90px;
+    font-family: 'Fira Code', 'Courier New', monospace;
+}
+
+textarea {
+    resize: vertical;
+}
+
+/* レスポンシブ対応 */
+@media (max-width: 1400px) {
+    body { overflow-y: auto; }
+    .main-container { 
+        flex-direction: column; 
+        height: auto; 
+    }
+    .main-container .column { 
+        width: 100%; 
+    }
+    .control-column { 
+        border-left: none; 
+        border-top: 2px solid #00d4ff;
+        padding: 15px; 
+    }
 }
