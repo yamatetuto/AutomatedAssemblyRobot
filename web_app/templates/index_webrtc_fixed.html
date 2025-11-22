@@ -3,19 +3,17 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>自動組立ロボット制御 v2.2</title>
-    <link rel="stylesheet" href="/static/css/style.css?v=1762686546">
+    <title>自動組立ロボット制御 v2.1</title>
+        <link rel="stylesheet" href="/static/css/style.css?v=1762686546">
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 </head>
 <body>
     <div class="header">
-        <h1>🤖 自動組立ロボット制御システム v2.2</h1>
+        <h1>🤖 自動組立ロボット制御システム v2.1</h1>
     </div>
     
-    <!-- 3カラムレイアウト -->
-    <div class="main-container three-column">
-        <!-- 左カラム: ビデオ -->
-        <div class="column video-column">
+    <div class="main-container">
+        <div class="left-panel">
             <div class="video-container">
                 <div class="video-wrapper">
                     <div id="connectionStatus" class="status connecting">接続中...</div>
@@ -38,28 +36,143 @@
             </div>
         </div>
         
-        <!-- 中央カラム: モニター -->
-        <div class="column monitor-column">
-            <!-- 電流値モニター -->
-            <div class="monitor-card">
-                <div class="monitor-header">
-                    <h2>⚡ 電流値</h2>
-                    <div class="monitor-value">
-                        <span id="currentValue">--</span>
-                        <span class="unit">mA</span>
-                    </div>
+        <div class="right-panel">
+            <div class="panel">
+                <div class="panel-header" onclick="togglePanel('params')">
+                    <h2>🎚️ カメラパラメータ</h2>
+                    <span class="toggle-icon" id="params-toggle">▼</span>
                 </div>
-                <div class="monitor-body">
-                    <canvas id="currentChart"></canvas>
+                <div class="panel-body" id="params-body">
+                    <button class="secondary" onclick="resetCameraDefaults()" style="width: 100%; margin-bottom: 10px;">🔄 デフォルトに戻す</button>
+                    <div id="cameraControls" class="controls"></div>
                 </div>
             </div>
             
-            <!-- 把持状態判定 -->
-            <div class="monitor-card">
-                <div class="monitor-header">
-                    <h2>🤏 把持状態</h2>
+            <div class="panel">
+                <div class="panel-header" onclick="togglePanel('snapshots')">
+                    <h2>📷 スナップショット</h2>
+                    <span class="toggle-icon collapsed" id="snapshots-toggle">▼</span>
                 </div>
-                <div class="monitor-body">
+                <div class="panel-body collapsed" id="snapshots-body">
+                    <button onclick="loadSnapshots()" style="width: 100%; margin-bottom: 10px;">🔄 一覧更新</button>
+                    <div id="snapshotsGrid" class="snapshots-grid"></div>
+                </div>
+            </div>
+            
+            <div class="panel">
+                <div class="panel-header" onclick="togglePanel('gripper')">
+                    <h2>🤏 グリッパー制御</h2>
+                    <span class="toggle-icon collapsed" id="gripper-toggle">▼</span>
+                </div>
+                <div class="panel-body collapsed" id="gripper-body">
+                    <div class="button-row" style="margin-bottom: 10px;">
+                        <button onclick="gripperServo('on')">⚡ サーボON</button>
+                        <button onclick="gripperServo('off')">⭕ サーボOFF</button>
+                    </div>
+                    <button onclick="gripperHome()" style="width: 100%; margin-bottom: 10px;">🏠 原点復帰</button>
+                    
+                    <div class="control-group">
+                        <label>ポジション移動 (0-63):</label>
+                        <input type="number" id="positionInput" min="0" max="63" value="0">
+                        <button onclick="gripperMove()">➡️ 移動</button>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="panel">
+                <div class="panel-header" onclick="togglePanel('postable')">
+                    <h2>📋 ポジションテーブル</h2>
+                    <span class="toggle-icon collapsed" id="postable-toggle">▼</span>
+                </div>
+                <div class="panel-body collapsed" id="postable-body">
+                    <div class="button-row" style="margin-bottom: 10px;">
+                        <button onclick="loadAllPositions()">📥 全件読込</button>
+                        <button onclick="toggleTableView()">🔄 表示切替</button>
+                    </div>
+                    
+                    <!-- テーブル一覧表示 -->
+                    <div id="posTableList" style="display:none;">
+                        <div class="postable-container">
+                            <table class="postable-table">
+                                <thead>
+                                    <tr>
+                                        <th>Pos</th>
+                                        <th>位置<br>(mm)</th>
+                                        <th>幅<br>(mm)</th>
+                                        <th>速度<br>(mm/s)</th>
+                                        <th>加速<br>(G)</th>
+                                        <th>減速<br>(G)</th>
+                                        <th>押当<br>(%)</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="posTableBody">
+                                </tbody>
+                            </table>
+                        </div>
+                        <div class="pagination" id="pagination"></div>
+                    </div>
+                    
+                    <!-- 個別編集表示 -->
+                    <div id="posTableEdit">
+                        <div class="control-group" style="margin-bottom: 10px;">
+                            <label>ポジション番号 (0-63):</label>
+                            <input type="number" id="posTableSelect" min="0" max="63" value="0">
+                            <button onclick="loadPositionTable()">📥 読み込み</button>
+                        </div>
+                        
+                        <div id="posTableData" class="controls" style="display:none; margin-top: 10px; position: relative; z-index: 50;">
+                            <div class="control-group">
+                                <label>目標位置 (mm):</label>
+                                <input type="number" id="pt_position_mm" min="0" max="4" step="0.01" value="0">
+                            </div>
+                            <div class="control-group">
+                                <label>位置決め幅 (mm):</label>
+                                <input type="number" id="pt_width_mm" min="0" max="4" step="0.01" value="0.1">
+                            </div>
+                            <div class="control-group">
+                                <label>速度 (mm/s):</label>
+                                <input type="number" id="pt_speed_mm_s" min="2" max="78" step="0.1" value="50">
+                            </div>
+                            <div class="control-group">
+                                <label>加速度 (G):</label>
+                                <input type="number" id="pt_accel_g" min="0.01" max="0.3" step="0.01" value="0.3">
+                            </div>
+                            <div class="control-group">
+                                <label>減速度 (G):</label>
+                                <input type="number" id="pt_decel_g" min="0.01" max="0.3" step="0.01" value="0.3">
+                            </div>
+                            <div class="control-group">
+                                <label>押付け電流 (%):</label>
+                                <input type="number" id="pt_push_current" min="0" max="70" value="0">
+                            </div>
+                            <button onclick="savePositionTable()" style="width: 100%; margin-top: 5px; position: relative; z-index: 100; cursor: pointer; pointer-events: auto;">💾 保存</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <!-- 電流値モニター -->
+            <div class="panel">
+                <div class="panel-header" onclick="togglePanel('current')">
+                    <h2>⚡ 電流値モニター</h2>
+                    <span class="toggle-icon collapsed" id="current-toggle">▼</span>
+                </div>
+                <div class="panel-body collapsed" id="current-body">
+                    <div class="current-display">
+                        <div class="current-value-large">
+                            <span id="currentValue">--</span> <span class="unit">mA</span>
+                        </div>
+                    </div>
+                    <canvas id="currentChart" width="400" height="200"></canvas>
+                </div>
+            </div>
+
+            <!-- 把持状態判定 -->
+            <div class="panel">
+                <div class="panel-header" onclick="togglePanel('grip')">
+                    <h2>🤏 把持状態判定</h2>
+                    <span class="toggle-icon collapsed" id="grip-toggle">▼</span>
+                </div>
+                <div class="panel-body collapsed" id="grip-body">
                     <div class="grip-status-display">
                         <div class="grip-indicator" id="gripIndicator">
                             <div class="status-led" id="statusLed"></div>
@@ -87,193 +200,10 @@
                 </div>
             </div>
         </div>
-        
-        <!-- 右カラム: 制御パネル -->
-        <div class="column control-column">
-            <!-- 3Dプリンター制御 -->
-            <div class="panel">
-                <div class="panel-header" onclick="togglePanel('printer')">
-                    <h2>🖨️ 3Dプリンター</h2>
-                    <span class="toggle-icon" id="printer-toggle">▼</span>
-                </div>
-                <div class="panel-body" id="printer-body">
-                    <div class="printer-status">
-                        <div class="status-row">
-                            <span>状態:</span>
-                            <span id="printerState">--</span>
-                        </div>
-                        <div class="status-row temps">
-                            <div>
-                                <span>ノズル:</span>
-                                <span id="nozzleTemp">--</span>°C
-                            </div>
-                            <div>
-                                <span>ベッド:</span>
-                                <span id="bedTemp">--</span>°C
-                            </div>
-                        </div>
-                        <div class="progress-wrapper">
-                            <div class="progress-bar">
-                                <div class="progress-fill" id="printerProgress"></div>
-                            </div>
-                            <div class="progress-meta">
-                                <span id="progressPercent">0%</span>
-                                <span id="progressTime">--</span>
-                            </div>
-                        </div>
-                    </div>
-                    
-                    <div class="file-picker">
-                        <select id="gcodeFileSelect"></select>
-                        <button onclick="refreshFiles()">🔄</button>
-                    </div>
-                    
-                    <div class="button-row tight">
-                        <button class="success" onclick="startPrint()">▶️ 開始</button>
-                        <button class="secondary" onclick="pausePrint()">⏸️ 一時停止</button>
-                        <button class="danger" onclick="cancelPrint()">⏹️ 中止</button>
-                    </div>
-                    
-                    <div class="printer-macro-section">
-                        <div class="section-header">
-                            <h3>マクロ</h3>
-                            <button class="secondary" onclick="toggleMacroForm()">➕ 追加</button>
-                        </div>
-                        
-                        <div id="macroFormWrapper" style="display:none; margin-bottom: 12px;">
-                            <div class="macro-form">
-                                <input type="text" id="macroName" placeholder="マクロ名" style="width: 100%; margin-bottom: 8px;">
-                                <textarea id="macroCommands" placeholder="G-code（改行区切り）"></textarea>
-                                <div class="button-row tight" style="margin-top: 8px;">
-                                    <button class="success" onclick="saveMacro()">💾 保存</button>
-                                    <button class="secondary" onclick="toggleMacroForm()">✖️ キャンセル</button>
-                                </div>
-                            </div>
-                        </div>
-                        
-                        <div class="macro-list" id="macroList"></div>
-                    </div>
-                </div>
-            </div>
-            
-            <!-- カメラパラメータ -->
-            <div class="panel">
-                <div class="panel-header" onclick="togglePanel('params')">
-                    <h2>🎚️ カメラパラメータ</h2>
-                    <span class="toggle-icon collapsed" id="params-toggle">▼</span>
-                </div>
-                <div class="panel-body collapsed" id="params-body">
-                    <button class="secondary" onclick="resetCameraDefaults()" style="width: 100%; margin-bottom: 10px;">�� デフォルトに戻す</button>
-                    <div id="cameraControls" class="controls"></div>
-                </div>
-            </div>
-            
-            <!-- スナップショット -->
-            <div class="panel">
-                <div class="panel-header" onclick="togglePanel('snapshots')">
-                    <h2>📷 スナップショット</h2>
-                    <span class="toggle-icon collapsed" id="snapshots-toggle">▼</span>
-                </div>
-                <div class="panel-body collapsed" id="snapshots-body">
-                    <button onclick="loadSnapshots()" style="width: 100%; margin-bottom: 10px;">🔄 一覧更新</button>
-                    <div id="snapshotsGrid" class="snapshots-grid"></div>
-                </div>
-            </div>
-            
-            <!-- グリッパー制御 -->
-            <div class="panel">
-                <div class="panel-header" onclick="togglePanel('gripper')">
-                    <h2>🤏 グリッパー制御</h2>
-                    <span class="toggle-icon collapsed" id="gripper-toggle">▼</span>
-                </div>
-                <div class="panel-body collapsed" id="gripper-body">
-                    <div class="button-row" style="margin-bottom: 10px;">
-                        <button onclick="gripperServo('on')">⚡ サーボON</button>
-                        <button onclick="gripperServo('off')">⭕ サーボOFF</button>
-                    </div>
-                    <button onclick="gripperHome()" style="width: 100%; margin-bottom: 10px;">🏠 原点復帰</button>
-                    
-                    <div class="control-group">
-                        <label>ポジション移動 (0-63):</label>
-                        <input type="number" id="positionInput" min="0" max="63" value="0">
-                        <button onclick="gripperMove()">➡️ 移動</button>
-                    </div>
-                </div>
-            </div>
-            
-            <!-- ポジションテーブル -->
-            <div class="panel">
-                <div class="panel-header" onclick="togglePanel('postable')">
-                    <h2>📋 ポジションテーブル</h2>
-                    <span class="toggle-icon collapsed" id="postable-toggle">▼</span>
-                </div>
-                <div class="panel-body collapsed" id="postable-body">
-                    <div class="button-row" style="margin-bottom: 10px;">
-                        <button onclick="loadAllPositions()">📥 全件読込</button>
-                        <button onclick="toggleTableView()">🔄 表示切替</button>
-                    </div>
-                    
-                    <div id="posTableList" style="display:none;">
-                        <div class="postable-container">
-                            <table class="postable-table">
-                                <thead>
-                                    <tr>
-                                        <th>Pos</th>
-                                        <th>位置<br>(mm)</th>
-                                        <th>幅<br>(mm)</th>
-                                        <th>速度<br>(mm/s)</th>
-                                        <th>加速<br>(G)</th>
-                                        <th>減速<br>(G)</th>
-                                        <th>押当<br>(%)</th>
-                                    </tr>
-                                </thead>
-                                <tbody id="posTableBody"></tbody>
-                            </table>
-                        </div>
-                        <div class="pagination" id="pagination"></div>
-                    </div>
-                    
-                    <div id="posTableEdit">
-                        <div class="control-group" style="margin-bottom: 10px;">
-                            <label>ポジション番号 (0-63):</label>
-                            <input type="number" id="posTableSelect" min="0" max="63" value="0">
-                            <button onclick="loadPositionTable()">📥 読み込み</button>
-                        </div>
-                        
-                        <div id="posTableData" class="controls" style="display:none; margin-top: 10px;">
-                            <div class="control-group">
-                                <label>目標位置 (mm):</label>
-                                <input type="number" id="pt_position_mm" min="0" max="4" step="0.01" value="0">
-                            </div>
-                            <div class="control-group">
-                                <label>位置決め幅 (mm):</label>
-                                <input type="number" id="pt_width_mm" min="0" max="4" step="0.01" value="0.1">
-                            </div>
-                            <div class="control-group">
-                                <label>速度 (mm/s):</label>
-                                <input type="number" id="pt_speed_mm_s" min="2" max="78" step="0.1" value="50">
-                            </div>
-                            <div class="control-group">
-                                <label>加速度 (G):</label>
-                                <input type="number" id="pt_accel_g" min="0.01" max="0.3" step="0.01" value="0.3">
-                            </div>
-                            <div class="control-group">
-                                <label>減速度 (G):</label>
-                                <input type="number" id="pt_decel_g" min="0.01" max="0.3" step="0.01" value="0.3">
-                            </div>
-                            <div class="control-group">
-                                <label>押付け電流 (%):</label>
-                                <input type="number" id="pt_push_current" min="0" max="70" value="0">
-                            </div>
-                            <button onclick="savePositionTable()" style="width: 100%; margin-top: 5px;">💾 保存</button>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
     </div>
     
-    <!-- 固定グリッパーステータス表示 -->
+
+        <!-- 固定グリッパーステータス表示 -->
     <div id="gripperStatusFixed" class="gripper-status-fixed">
         <div class="status-label">🤏 グリッパー</div>
         <span id="gripperStatus">位置: --mm | サーボ: --</span>
@@ -281,6 +211,6 @@
     
     <div id="toast" class="toast"></div>
     
-    <script src="/static/js/app.js?v=1762686546"></script>
+        <script src="/static/js/app.js?v=1762686546"></script>
 </body>
 </html>
