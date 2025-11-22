@@ -32,3 +32,8 @@ SNAPSHOTS_DIR.mkdir(exist_ok=True)
 
 # ポジションテーブル保存先  
 POSITION_TABLE_FILE = PROJECT_ROOT / 'position_table.json'
+
+# OctoPrint設定
+OCTOPRINT_URL = os.getenv('OCTOPRINT_URL', 'http://10.32.77.150:5000')
+OCTOPRINT_API_KEY = os.getenv('OCTOPRINT_API_KEY', 'vgmyhOvf6gj9fR1a3MwZmPFYIWCYsDkSR_mSdQkIpU0')
+OCTOPRINT_POLL_INTERVAL = float(os.getenv('OCTOPRINT_POLL_INTERVAL', '5.0'))

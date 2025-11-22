@@ -22,7 +22,15 @@ sys.path.insert(0, str(Path(__file__).parent))
 from src.camera.camera_manager import CameraManager
 from src.gripper.gripper_manager import GripperManager
 from src.webrtc.webrtc_manager import WebRTCManager
-from src.config.settings import SNAPSHOTS_DIR
+from src.config.settings import (
+    CAMERA_DEVICE,
+    SNAPSHOTS_DIR,
+    OCTOPRINT_URL,
+    OCTOPRINT_API_KEY,
+    OCTOPRINT_POLL_INTERVAL,
+)
+from src.printer.octoprint_client import OctoPrintClient, OctoPrintError
+from src.printer.printer_manager import PrinterManager
 
 # ロギング設定
 logging.basicConfig(
@@ -35,13 +43,14 @@ logger = logging.getLogger(__name__)
 camera_manager: Optional[CameraManager] = None
 gripper_manager: Optional[GripperManager] = None
 webrtc_manager: Optional[WebRTCManager] = None
+printer_manager: Optional[PrinterManager] = None
 
 
 # Lifespan context manager
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """アプリケーションのライフサイクル管理"""
-    global camera_manager, gripper_manager, webrtc_manager
+    global camera_manager, gripper_manager, webrtc_manager, printer_manager
     
     logger.info("🚀 アプリケーションを起動中...")
     
@@ -71,6 +80,28 @@ async def lifespan(app: FastAPI):
         logger.error(f"❌ WebRTCサービス起動失敗: {e}")
         webrtc_manager = None
     
+    # 3Dプリンター初期化
+    if OCTOPRINT_URL and OCTOPRINT_API_KEY:
+        printer_client: Optional[OctoPrintClient] = None
+        try:
+            printer_client = OctoPrintClient(OCTOPRINT_URL, OCTOPRINT_API_KEY)
+            printer_manager = PrinterManager(
+                printer_client,
+                poll_interval=OCTOPRINT_POLL_INTERVAL,
+            )
+            await printer_manager.start()
+            logger.info("✅ 3Dプリンターサービス起動")
+        except Exception as e:
+            logger.error(f"❌ 3Dプリンターサービス起動失敗: {e}")
+            if printer_client:
+                try:
+                    await printer_client.close()
+                except Exception:
+                    logger.debug("OctoPrintClientクローズ時に警告", exc_info=True)
+            printer_manager = None
+    else:
+        logger.info("ℹ️ OctoPrint設定が未定義のため3Dプリンターサービスをスキップします")
+    
     logger.info("🎉 すべてのサービスが起動しました")
     
     yield
@@ -86,6 +117,9 @@ async def lifespan(app: FastAPI):
     
     if gripper_manager:
         await gripper_manager.disconnect()
+
+    if printer_manager:
+        await printer_manager.stop()
     
     logger.info("👋 すべてのサービスを停止しました")
 
@@ -126,7 +160,8 @@ async def health_check():
     return {
         "status": "healthy",
         "camera": camera_manager.is_opened() if camera_manager else False,
-        "gripper": gripper_manager.is_connected if gripper_manager else False
+        "gripper": gripper_manager.is_connected if gripper_manager else False,
+        "printer": printer_manager is not None
     }
 
 
@@ -350,6 +385,54 @@ async def change_codec(request: Request):
     except Exception as e:
         logger.error(f"コーデック変更エラー: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# プリンターAPI
+@app.get("/api/printer/status")
+async def printer_status():
+    """3Dプリンターステータス取得"""
+    if not printer_manager:
+        return {"status": "disabled", "message": "OctoPrintサービスが無効です"}
+    try:
+        status = await printer_manager.get_status()
+        return {"status": "ok", "data": status}
+    except OctoPrintError as e:
+        logger.error(f"プリンターステータス取得エラー: {e}")
+        raise HTTPException(status_code=503, detail=str(e))
+    except Exception as e:
+        logger.error(f"プリンターステータス取得エラー: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/printer/pause")
+async def printer_pause():
+    """プリント一時停止"""
+    if not printer_manager:
+        raise HTTPException(status_code=503, detail="3Dプリンターサービスが起動していません")
+    try:
+        await printer_manager.pause_job()
+        return {"status": "ok", "message": "一時停止コマンドを送信しました"}
+    except OctoPrintError as e:
+        raise HTTPException(status_code=502, detail=str(e))
+    except Exception as e:
+        logger.error(f"プリンター一時停止エラー: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/printer/resume")
+async def printer_resume():
+    """プリント再開"""
+    if not printer_manager:
+        raise HTTPException(status_code=503, detail="3Dプリンターサービスが起動していません")
+    try:
+        await printer_manager.resume_job()
+        return {"status": "ok", "message": "再開コマンドを送信しました"}
+    except OctoPrintError as e:
+        raise HTTPException(status_code=502, detail=str(e))
+    except Exception as e:
+        logger.error(f"プリンター再開エラー: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 
 # グリッパーAPI

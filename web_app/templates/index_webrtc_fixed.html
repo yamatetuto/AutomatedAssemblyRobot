@@ -45,6 +45,7 @@
                     <div class="monitor-switch">
                         <button type="button" id="monitorToggleButton" onclick="toggleMonitorView(event)">⚡ 電流値モニターに切替</button>
                     </div>
+                    <div class="monitor-status-label" id="monitorStatusLabel">表示: 把持状態モニター</div>
 
                     <div id="gripMonitorView" class="monitor-view active">
 
@@ -84,6 +85,48 @@
                             </div>
                         </div>
                         <canvas id="currentChart" width="400" height="200"></canvas>
+                    </div>
+                </div>
+            </div>
+
+            <div class="panel">
+                <div class="panel-header static">
+                    <h2>🖨️ 3Dプリンター</h2>
+                </div>
+                <div class="panel-body printer-panel">
+                    <div id="printerStatusMessage" class="printer-status-message">OctoPrint設定を行うと情報が表示されます</div>
+                    <div class="printer-state-row">
+                        <div class="printer-state-card">
+                            <div class="label">状態</div>
+                            <div class="value" id="printerState">--</div>
+                        </div>
+                        <div class="printer-eta">
+                            <div class="label">完了予測</div>
+                            <div class="value" id="printerEta">--</div>
+                        </div>
+                    </div>
+                    <div class="printer-progress">
+                        <div class="progress-heading">
+                            <span>進捗</span>
+                            <span id="printerProgressText">--%</span>
+                        </div>
+                        <div class="progress-bar">
+                            <div class="progress-fill" id="printerProgressBar"></div>
+                        </div>
+                    </div>
+                    <div class="printer-temps">
+                        <div class="temp-card">
+                            <div class="temp-label">ノズル</div>
+                            <div class="temp-value" id="printerToolTemp">-- ℃</div>
+                        </div>
+                        <div class="temp-card">
+                            <div class="temp-label">ベッド</div>
+                            <div class="temp-value" id="printerBedTemp">-- ℃</div>
+                        </div>
+                    </div>
+                    <div class="printer-actions">
+                        <button type="button" class="secondary" id="pausePrinterButton" onclick="pausePrinterJob()" disabled>⏸️ 一時停止</button>
+                        <button type="button" class="secondary" id="resumePrinterButton" onclick="resumePrinterJob()" disabled>▶️ 再開</button>
                     </div>
                 </div>
             </div>
