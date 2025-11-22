@@ -28,25 +28,20 @@ body {
     padding: 15px 20px 20px;
 }
 
-.main-container.three-column {
+.left-panel {
+    flex: 5;
+    min-width: 0;
     display: flex;
+    flex-direction: column;
 }
 
-.main-container .column {
+.right-panel {
+    flex: 5;
+    min-width: 0;
     display: flex;
     flex-direction: column;
     gap: 15px;
-    min-height: 0;
-}
-
-.video-column {
-    flex: 5;
-    min-width: 0;
-}
-
-.monitor-column {
-    flex: 2.5;
-    min-width: 0;
+    overflow-y: auto;
 }
 
 .control-column {
