@@ -47,9 +47,7 @@
                     </div>
 
                     <div id="gripMonitorView" class="monitor-view active">
-                        <div class="monitor-actions" style="margin-bottom: 10px; display: flex; justify-content: flex-end;">
-                            <button type="button" class="secondary" onclick="fetchGripStatus()">🔄 状態取得</button>
-                        </div>
+
                         <div class="grip-status-display">
                             <div class="grip-indicator" id="gripIndicator">
                                 <div class="status-led" id="statusLed"></div>
@@ -72,6 +70,9 @@
                                     <span class="detail-label">判定理由:</span>
                                     <span class="detail-value" id="gripReason">--</span>
                                 </div>
+                            </div>
+                            <div class="monitor-actions">
+                                <button type="button" class="secondary" onclick="fetchGripStatus()">🔄 状態取得</button>
                             </div>
                         </div>
                     </div>
