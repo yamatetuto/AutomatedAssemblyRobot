@@ -13,7 +13,7 @@
     </div>
     
     <div class="main-container">
-        <div class="left-panel">
+        <div class="column video-column">
             <div class="video-container">
                 <div class="video-wrapper">
                     <div id="connectionStatus" class="status connecting">接続中...</div>
@@ -35,8 +35,60 @@
                 </div>
             </div>
         </div>
-        
-        <div class="right-panel">
+
+        <div class="column monitor-column">
+            <div class="panel">
+                <div class="panel-header static">
+                    <h2>📊 モニター</h2>
+                </div>
+                <div class="panel-body">
+                    <div class="monitor-switch">
+                        <button type="button" id="monitorToggleButton" onclick="toggleMonitorView(event)">⚡ 電流値モニターに切替</button>
+                    </div>
+
+                    <div id="gripMonitorView" class="monitor-view active">
+                        <div class="monitor-actions" style="margin-bottom: 10px; display: flex; justify-content: flex-end;">
+                            <button type="button" class="secondary" onclick="fetchGripStatus()">🔄 状態取得</button>
+                        </div>
+                        <div class="grip-status-display">
+                            <div class="grip-indicator" id="gripIndicator">
+                                <div class="status-led" id="statusLed"></div>
+                                <div class="status-text" id="statusText">待機中</div>
+                            </div>
+                            <div class="grip-details">
+                                <div class="detail-item">
+                                    <span class="detail-label">電流値:</span>
+                                    <span class="detail-value" id="gripCurrent">--</span> mA
+                                </div>
+                                <div class="detail-item">
+                                    <span class="detail-label">位置:</span>
+                                    <span class="detail-value" id="gripPosition">--</span> mm
+                                </div>
+                                <div class="detail-item">
+                                    <span class="detail-label">空振りフラグ:</span>
+                                    <span class="detail-value" id="gripPsfl">--</span>
+                                </div>
+                                <div class="detail-item">
+                                    <span class="detail-label">判定理由:</span>
+                                    <span class="detail-value" id="gripReason">--</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div id="currentMonitorView" class="monitor-view">
+                        <div class="current-display">
+                            <div class="current-value-large">
+                                <span id="currentValue">--</span> <span class="unit">mA</span>
+                            </div>
+                        </div>
+                        <canvas id="currentChart" width="400" height="200"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="column control-column">
             <div class="panel">
                 <div class="panel-header" onclick="togglePanel('params')">
                     <h2>🎚️ カメラパラメータ</h2>
@@ -47,7 +99,7 @@
                     <div id="cameraControls" class="controls"></div>
                 </div>
             </div>
-            
+
             <div class="panel">
                 <div class="panel-header" onclick="togglePanel('snapshots')">
                     <h2>📷 スナップショット</h2>
@@ -58,7 +110,7 @@
                     <div id="snapshotsGrid" class="snapshots-grid"></div>
                 </div>
             </div>
-            
+
             <div class="panel">
                 <div class="panel-header" onclick="togglePanel('gripper')">
                     <h2>🤏 グリッパー制御</h2>
@@ -70,7 +122,7 @@
                         <button onclick="gripperServo('off')">⭕ サーボOFF</button>
                     </div>
                     <button onclick="gripperHome()" style="width: 100%; margin-bottom: 10px;">🏠 原点復帰</button>
-                    
+
                     <div class="control-group">
                         <label>ポジション移動 (0-63):</label>
                         <input type="number" id="positionInput" min="0" max="63" value="0">
@@ -78,7 +130,7 @@
                     </div>
                 </div>
             </div>
-            
+
             <div class="panel">
                 <div class="panel-header" onclick="togglePanel('postable')">
                     <h2>📋 ポジションテーブル</h2>
@@ -89,8 +141,7 @@
                         <button onclick="loadAllPositions()">📥 全件読込</button>
                         <button onclick="toggleTableView()">🔄 表示切替</button>
                     </div>
-                    
-                    <!-- テーブル一覧表示 -->
+
                     <div id="posTableList" style="display:none;">
                         <div class="postable-container">
                             <table class="postable-table">
@@ -111,15 +162,14 @@
                         </div>
                         <div class="pagination" id="pagination"></div>
                     </div>
-                    
-                    <!-- 個別編集表示 -->
+
                     <div id="posTableEdit">
                         <div class="control-group" style="margin-bottom: 10px;">
                             <label>ポジション番号 (0-63):</label>
                             <input type="number" id="posTableSelect" min="0" max="63" value="0">
-                            <button onclick="loadPositionTable()">📥 読み込み</button>
+                            <button onclick="loadPositionTable()">�� 読み込み</button>
                         </div>
-                        
+
                         <div id="posTableData" class="controls" style="display:none; margin-top: 10px; position: relative; z-index: 50;">
                             <div class="control-group">
                                 <label>目標位置 (mm):</label>
@@ -150,59 +200,9 @@
                     </div>
                 </div>
             </div>
-            <!-- 電流値モニター -->
-            <div class="panel">
-                <div class="panel-header" onclick="togglePanel('current')">
-                    <h2>⚡ 電流値モニター</h2>
-                    <span class="toggle-icon collapsed" id="current-toggle">▼</span>
-                </div>
-                <div class="panel-body collapsed" id="current-body">
-                    <div class="current-display">
-                        <div class="current-value-large">
-                            <span id="currentValue">--</span> <span class="unit">mA</span>
-                        </div>
-                    </div>
-                    <canvas id="currentChart" width="400" height="200"></canvas>
-                </div>
-            </div>
-
-            <!-- 把持状態判定 -->
-            <div class="panel">
-                <div class="panel-header" onclick="togglePanel('grip')">
-                    <h2>🤏 把持状態判定</h2>
-                    <span class="toggle-icon collapsed" id="grip-toggle">▼</span>
-                </div>
-                <div class="panel-body collapsed" id="grip-body">
-                    <div class="grip-status-display">
-                        <div class="grip-indicator" id="gripIndicator">
-                            <div class="status-led" id="statusLed"></div>
-                            <div class="status-text" id="statusText">待機中</div>
-                        </div>
-                        <div class="grip-details">
-                            <div class="detail-item">
-                                <span class="detail-label">電流値:</span>
-                                <span class="detail-value" id="gripCurrent">--</span> mA
-                            </div>
-                            <div class="detail-item">
-                                <span class="detail-label">位置:</span>
-                                <span class="detail-value" id="gripPosition">--</span> mm
-                            </div>
-                            <div class="detail-item">
-                                <span class="detail-label">空振りフラグ:</span>
-                                <span class="detail-value" id="gripPsfl">--</span>
-                            </div>
-                            <div class="detail-item">
-                                <span class="detail-label">判定理由:</span>
-                                <span class="detail-value" id="gripReason">--</span>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
         </div>
     </div>
     
-
         <!-- 固定グリッパーステータス表示 -->
     <div id="gripperStatusFixed" class="gripper-status-fixed">
         <div class="status-label">🤏 グリッパー</div>

@@ -469,6 +469,7 @@ function editPositionFromTable(position) {
 window.onload = () => {
     setupWebRTC();
     loadCameraControls();
+    updateMonitorViewUI();
     setInterval(updateGripperStatus, 2000);
 };
 
@@ -634,53 +635,60 @@ async function checkGripStatus(silent = false) {
     }
 }
 
-// ===== 把持状態判定の自動更新 =====
-let gripStatusInterval = null;
-
-function startGripStatusMonitor() {
-    if (gripStatusInterval) return;
-    
-    // 初回実行
-    checkGripStatus(true);  // silent=true
-    
-    // 3秒間隔で自動更新（silent=trueでトースト通知を抑制）
-    gripStatusInterval = setInterval(async () => {
-        await checkGripStatus(true);
-    }, 3000);  // 3秒間隔
+// ===== 把持状態判定の手動更新 =====
+function fetchGripStatus(silent = false) {
+    checkGripStatus(silent);
 }
 
-function stopGripStatusMonitor() {
-    if (gripStatusInterval) {
-        clearInterval(gripStatusInterval);
-        gripStatusInterval = null;
+let activeMonitorView = 'grip';
+
+function updateMonitorViewUI() {
+    const isGrip = activeMonitorView === 'grip';
+    const gripView = document.getElementById('gripMonitorView');
+    const currentView = document.getElementById('currentMonitorView');
+    if (gripView) {
+        gripView.classList.toggle('active', isGrip);
+        gripView.style.display = isGrip ? 'block' : 'none';
+    }
+    if (currentView) {
+        currentView.classList.toggle('active', !isGrip);
+        currentView.style.display = isGrip ? 'none' : 'block';
+    }
+
+    const statusLabel = document.getElementById('monitorStatusLabel');
+    if (statusLabel) {
+        statusLabel.textContent = isGrip ? '表示: 把持状態モニター' : '表示: 電流値モニター';
+    }
+
+    const toggleButton = document.getElementById('monitorToggleButton');
+    if (toggleButton) {
+        toggleButton.textContent = isGrip ? '⚡ 電流値モニターに切替' : '🤏 把持状態モニターに切替';
     }
 }
 
-// パネル展開時に電流値モニター・把持状態判定の自動更新開始
-const originalTogglePanel = togglePanel;
-togglePanel = function(panelId) {
-    // 元の関数を実行
-    originalTogglePanel(panelId);
-    
-    setTimeout(() => {
-        // 電流値モニターパネルの場合
-        if (panelId === 'current') {
-            const body = document.getElementById('current-body');
-            if (body && !body.classList.contains('collapsed')) {
-                startCurrentMonitor();
-            } else {
-                stopCurrentMonitor();
-            }
-        }
-        
-        // 把持状態判定パネルの場合
-        if (panelId === 'grip') {
-            const body = document.getElementById('grip-body');
-            if (body && !body.classList.contains('collapsed')) {
-                startGripStatusMonitor();
-            } else {
-                stopGripStatusMonitor();
-            }
-        }
-    }, 100);
-};
+function setMonitorView(view) {
+    if (view !== 'grip' && view !== 'current') {
+        return;
+    }
+    if (view === activeMonitorView) {
+        updateMonitorViewUI();
+        return;
+    }
+    activeMonitorView = view;
+    if (view === 'grip') {
+        stopCurrentMonitor();
+    } else {
+        startCurrentMonitor();
+    }
+    updateMonitorViewUI();
+}
+
+function toggleMonitorView(event) {
+    if (event) {
+        event.preventDefault();
+        event.stopPropagation();
+    }
+    const nextView = activeMonitorView === 'grip' ? 'current' : 'grip';
+    setMonitorView(nextView);
+}
+
