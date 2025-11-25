@@ -4,8 +4,6 @@ let allPositions = [];
 let currentPage = 0;
 const itemsPerPage = 10;
 let isTableView = false;
-let printerStatusInterval = null;
-let printerStatusDisabled = false;
 
 function showToast(message, type = 'info') {
     const toast = document.getElementById('toast');
@@ -471,8 +469,6 @@ function editPositionFromTable(position) {
 window.onload = () => {
     setupWebRTC();
     loadCameraControls();
-    updateMonitorViewUI();
-    startPrinterMonitor();
     setInterval(updateGripperStatus, 2000);
 };
 
@@ -638,71 +634,99 @@ async function checkGripStatus(silent = false) {
     }
 }
 
-// ===== 把持状態判定の手動更新 =====
-function fetchGripStatus(silent = false) {
-    checkGripStatus(silent);
+// ===== 把持状態判定の自動更新 =====
+let gripStatusInterval = null;
+
+function startGripStatusMonitor() {
+    if (gripStatusInterval) return;
+    
+    // 初回実行
+    checkGripStatus(true);  // silent=true
+    
+    // 3秒間隔で自動更新（silent=trueでトースト通知を抑制）
+    gripStatusInterval = setInterval(async () => {
+        await checkGripStatus(true);
+    }, 3000);  // 3秒間隔
 }
 
-let activeMonitorView = 'grip';
-
-function updateMonitorViewUI() {
-    const isGrip = activeMonitorView === 'grip';
-    const gripView = document.getElementById('gripMonitorView');
-    const currentView = document.getElementById('currentMonitorView');
-    if (gripView) {
-        gripView.classList.toggle('active', isGrip);
-        gripView.style.display = isGrip ? 'block' : 'none';
-    }
-    if (currentView) {
-        currentView.classList.toggle('active', !isGrip);
-        currentView.style.display = isGrip ? 'none' : 'block';
-    }
-
-    const statusLabel = document.getElementById('monitorStatusLabel');
-    if (statusLabel) {
-        statusLabel.textContent = isGrip ? '表示: 把持状態モニター' : '表示: 電流値モニター';
-    }
-
-    const toggleButton = document.getElementById('monitorToggleButton');
-    if (toggleButton) {
-        toggleButton.textContent = isGrip ? '⚡ 電流値モニターに切替' : '🤏 把持状態モニターに切替';
+function stopGripStatusMonitor() {
+    if (gripStatusInterval) {
+        clearInterval(gripStatusInterval);
+        gripStatusInterval = null;
     }
 }
 
-function setMonitorView(view) {
-    if (view !== 'grip' && view !== 'current') {
-        return;
+// パネル展開時に電流値モニター・把持状態判定の自動更新開始
+const originalTogglePanel = togglePanel;
+togglePanel = function(panelId) {
+    // 元の関数を実行
+    originalTogglePanel(panelId);
+    
+    setTimeout(() => {
+        // 電流値モニターパネルの場合
+        if (panelId === 'current') {
+            const body = document.getElementById('current-body');
+            if (body && !body.classList.contains('collapsed')) {
+                startCurrentMonitor();
+            } else {
+                stopCurrentMonitor();
+            }
+        }
+        
+        // 把持状態判定パネルの場合
+        if (panelId === 'grip') {
+            const body = document.getElementById('grip-body');
+            if (body && !body.classList.contains('collapsed')) {
+                startGripStatusMonitor();
+            } else {
+                stopGripStatusMonitor();
+            }
+        }
+    }, 100);
+};
+
+// ==================== プリンター制御 ====================
+let printerStatusInterval = null;
+let macrosData = [];
+
+// プリンター状態のポーリング
+async function updatePrinterStatus() {
+    try {
+        const resp = await fetch('/api/printer/status');
+        const data = await resp.json();
+        
+        if (data.status === 'ok') {
+            const state = data.state || 'unknown';
+            const temps = data.temperatures || {};
+            const progress = data.progress || {};
+            
+            document.getElementById('printerState').textContent = state;
+            document.getElementById('nozzleTemp').textContent = 
+                temps.tool0?.actual?.toFixed(1) || '--';
+            document.getElementById('bedTemp').textContent = 
+                temps.bed?.actual?.toFixed(1) || '--';
+            
+            const percent = progress.completion || 0;
+            document.getElementById('printerProgress').style.width = percent + '%';
+            document.getElementById('progressPercent').textContent = percent.toFixed(1) + '%';
+            
+            if (progress.printTimeLeft) {
+                const mins = Math.floor(progress.printTimeLeft / 60);
+                document.getElementById('progressTime').textContent = `残り ${mins} 分`;
+            } else {
+                document.getElementById('progressTime').textContent = '--';
+            }
+        }
+    } catch (err) {
+        console.error('プリンター状態取得エラー:', err);
     }
-    if (view === activeMonitorView) {
-        updateMonitorViewUI();
-        return;
-    }
-    activeMonitorView = view;
-    if (view === 'grip') {
-        stopCurrentMonitor();
-    } else {
-        startCurrentMonitor();
-    }
-    updateMonitorViewUI();
 }
 
-function toggleMonitorView(event) {
-    if (event) {
-        event.preventDefault();
-        event.stopPropagation();
-    }
-    const nextView = activeMonitorView === 'grip' ? 'current' : 'grip';
-    setMonitorView(nextView);
-}
-
-// ===== 3Dプリンター =====
 function startPrinterMonitor() {
-    if (printerStatusDisabled || printerStatusInterval) {
-        return;
+    if (!printerStatusInterval) {
+        updatePrinterStatus();
+        printerStatusInterval = setInterval(updatePrinterStatus, 3000);
     }
-    setPrinterMessage('プリンター情報を取得中...', 'info');
-    fetchPrinterStatus();
-    printerStatusInterval = setInterval(fetchPrinterStatus, 5000);
 }
 
 function stopPrinterMonitor() {
@@ -712,226 +736,189 @@ function stopPrinterMonitor() {
     }
 }
 
-async function fetchPrinterStatus() {
-    if (printerStatusDisabled) {
-        return;
-    }
+// ファイル一覧を取得
+async function refreshFiles() {
     try {
-        const response = await fetch('/api/printer/status');
-        const payload = await response.json();
-
-        if (payload.status === 'disabled') {
-            handlePrinterDisabled(payload.message);
-            return;
+        const resp = await fetch('/api/printer/files');
+        const data = await resp.json();
+        const select = document.getElementById('gcodeFileSelect');
+        select.innerHTML = '<option value="">-- ファイルを選択 --</option>';
+        
+        if (data.status === 'ok' && data.files) {
+            data.files.forEach(f => {
+                const opt = document.createElement('option');
+                opt.value = f.name;
+                opt.textContent = f.name;
+                select.appendChild(opt);
+            });
         }
-        if (!response.ok) {
-            throw new Error(payload.detail || payload.message || `HTTP ${response.status}`);
-        }
-        if (payload.status !== 'ok' || !payload.data) {
-            throw new Error(payload.message || 'プリンター情報を取得できませんでした');
-        }
-
-        updatePrinterUI(payload.data);
-    } catch (error) {
-        console.error('プリンター状態取得エラー:', error);
-        setPrinterMessage(error.message || 'プリンター情報の取得に失敗しました', 'error');
+    } catch (err) {
+        showToast('ファイル一覧取得エラー', 'error');
     }
 }
 
-function handlePrinterDisabled(message) {
-    printerStatusDisabled = true;
-    stopPrinterMonitor();
-    updatePrinterButtons(null);
-    setPrinterMessage(message || 'OctoPrintサービスが無効です', 'warning');
-}
-
-function setPrinterMessage(message, type = 'info') {
-    const messageEl = document.getElementById('printerStatusMessage');
-    if (!messageEl) {
+// 印刷開始
+async function startPrint() {
+    const select = document.getElementById('gcodeFileSelect');
+    const filename = select.value;
+    if (!filename) {
+        showToast('ファイルを選択してください', 'error');
         return;
     }
-    messageEl.classList.remove('info', 'warning', 'error', 'hidden');
-    if (!message) {
-        messageEl.classList.add('hidden');
-        messageEl.textContent = '';
-        return;
+    
+    try {
+        const resp = await fetch('/api/printer/print', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({filename})
+        });
+        const data = await resp.json();
+        showToast(data.message || '印刷開始', data.status === 'ok' ? 'success' : 'error');
+    } catch (err) {
+        showToast('印刷開始エラー', 'error');
     }
-    messageEl.textContent = message;
-    messageEl.classList.add(type);
 }
 
-function updatePrinterUI(status) {
-    const stateEl = document.getElementById('printerState');
-    if (stateEl) {
-        stateEl.textContent = prettifyPrinterState(status.state);
+// 一時停止
+async function pausePrint() {
+    try {
+        const resp = await fetch('/api/printer/pause', {method: 'POST'});
+        const data = await resp.json();
+        showToast(data.message || '一時停止', data.status === 'ok' ? 'success' : 'error');
+    } catch (err) {
+        showToast('一時停止エラー', 'error');
     }
+}
 
-    updatePrinterProgress(status.progress);
-    const etaEl = document.getElementById('printerEta');
-    if (etaEl) {
-        etaEl.textContent = formatEta(status.eta);
+// 中止
+async function cancelPrint() {
+    if (!confirm('印刷を中止しますか?')) return;
+    
+    try {
+        const resp = await fetch('/api/printer/cancel', {method: 'POST'});
+        const data = await resp.json();
+        showToast(data.message || '印刷中止', data.status === 'ok' ? 'success' : 'error');
+    } catch (err) {
+        showToast('中止エラー', 'error');
     }
+}
 
-    const temps = status.temperatures || {};
-    const toolEl = document.getElementById('printerToolTemp');
-    if (toolEl) {
-        toolEl.textContent = formatTemperature(temps.tool0);
+// マクロ一覧を取得
+async function loadMacros() {
+    try {
+        const resp = await fetch('/api/printer/macros');
+        const data = await resp.json();
+        
+        if (data.status === 'ok') {
+            macrosData = data.macros || [];
+            renderMacros();
+        }
+    } catch (err) {
+        console.error('マクロ読み込みエラー:', err);
     }
-    const bedEl = document.getElementById('printerBedTemp');
-    if (bedEl) {
-        bedEl.textContent = formatTemperature(temps.bed);
+}
+
+function renderMacros() {
+    const list = document.getElementById('macroList');
+    list.innerHTML = '';
+    
+    macrosData.forEach(macro => {
+        const item = document.createElement('div');
+        item.className = 'macro-item';
+        item.innerHTML = `
+            <div class="macro-item-header">
+                <span>${macro.name}</span>
+            </div>
+            <div class="macro-commands">${macro.commands.join('\n')}</div>
+            <div class="macro-item-buttons">
+                <button class="success" onclick="runMacro('${macro.name}')">▶️ 実行</button>
+                <button class="danger" onclick="deleteMacro('${macro.name}')">🗑️ 削除</button>
+            </div>
+        `;
+        list.appendChild(item);
+    });
+}
+
+// マクロ実行
+async function runMacro(name) {
+    try {
+        const resp = await fetch('/api/printer/macro/run', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({name})
+        });
+        const data = await resp.json();
+        showToast(data.message || `マクロ「${name}」実行`, data.status === 'ok' ? 'success' : 'error');
+    } catch (err) {
+        showToast('マクロ実行エラー', 'error');
     }
+}
 
-    updatePrinterButtons(status.state);
+// マクロ削除
+async function deleteMacro(name) {
+    if (!confirm(`マクロ「${name}」を削除しますか?`)) return;
+    
+    try {
+        const resp = await fetch(`/api/printer/macro/${encodeURIComponent(name)}`, {
+            method: 'DELETE'
+        });
+        const data = await resp.json();
+        showToast(data.message || 'マクロ削除', data.status === 'ok' ? 'success' : 'error');
+        if (data.status === 'ok') loadMacros();
+    } catch (err) {
+        showToast('マクロ削除エラー', 'error');
+    }
+}
 
-    if (status.message) {
-        setPrinterMessage(status.message, 'warning');
-    } else if ((status.state || '').toLowerCase() === 'offline') {
-        setPrinterMessage('プリンターがオフラインです。OctoPrintの接続を確認してください。', 'warning');
+// マクロフォーム表示切替
+function toggleMacroForm() {
+    const wrapper = document.getElementById('macroFormWrapper');
+    if (wrapper.style.display === 'none') {
+        wrapper.style.display = 'block';
+        document.getElementById('macroName').value = '';
+        document.getElementById('macroCommands').value = '';
     } else {
-        setPrinterMessage('');
+        wrapper.style.display = 'none';
     }
 }
 
-function updatePrinterProgress(progress) {
-    const bar = document.getElementById('printerProgressBar');
-    const text = document.getElementById('printerProgressText');
-    if (!bar || !text) {
+// マクロ保存
+async function saveMacro() {
+    const name = document.getElementById('macroName').value.trim();
+    const commandsText = document.getElementById('macroCommands').value.trim();
+    
+    if (!name || !commandsText) {
+        showToast('マクロ名とコマンドを入力してください', 'error');
         return;
     }
-
-    if (typeof progress === 'number' && !Number.isNaN(progress)) {
-        const clamped = Math.max(0, Math.min(100, progress));
-        bar.classList.remove('indeterminate');
-        bar.style.width = clamped.toFixed(1) + '%';
-        text.textContent = clamped.toFixed(1) + '%';
-    } else {
-        bar.classList.add('indeterminate');
-        bar.style.width = '25%';
-        text.textContent = '--%';
-    }
-}
-
-function formatEta(seconds) {
-    if (typeof seconds !== 'number' || Number.isNaN(seconds) || seconds <= 0) {
-        return '--';
-    }
-    const totalMinutes = Math.round(seconds / 60);
-    const hours = Math.floor(totalMinutes / 60);
-    const minutes = totalMinutes % 60;
-    if (hours > 0) {
-        return `${hours}時間${minutes.toString().padStart(2, '0')}分`;
-    }
-    return `${Math.max(1, minutes)}分`;
-}
-
-function formatTemperature(temp) {
-    if (!temp || (typeof temp.actual !== 'number' && typeof temp.temperature !== 'number')) {
-        return '-- ℃';
-    }
-    const actual = typeof temp.actual === 'number' ? temp.actual : temp.temperature;
-    const target = typeof temp.target === 'number' ? temp.target : undefined;
-    if (typeof target === 'number') {
-        return `${actual.toFixed(1)} / ${target.toFixed(1)} ℃`;
-    }
-    return `${actual.toFixed(1)} ℃`;
-}
-
-function prettifyPrinterState(state) {
-    if (!state) {
-        return '不明';
-    }
-    const normalized = state.toLowerCase();
-    const labels = {
-        operational: '待機中',
-        printing: '造形中',
-        paused: '一時停止',
-        pausing: '停止処理中',
-        resuming: '再開中',
-        cancelling: 'キャンセル中',
-        finishing: '完了処理中',
-        offline: 'オフライン',
-        error: 'エラー'
-    };
-    return labels[normalized] || state;
-}
-
-function updatePrinterButtons(state) {
-    const pauseBtn = document.getElementById('pausePrinterButton');
-    const resumeBtn = document.getElementById('resumePrinterButton');
-    if (!pauseBtn || !resumeBtn) {
-        return;
-    }
-
-    if (!state) {
-        pauseBtn.disabled = true;
-        resumeBtn.disabled = true;
-        return;
-    }
-
-    const normalized = state.toLowerCase();
-    const canPause = normalized.includes('print') && !normalized.includes('pause');
-    const canResume = normalized.includes('pause');
-    pauseBtn.disabled = !canPause;
-    resumeBtn.disabled = !canResume;
-}
-
-async function pausePrinterJob() {
-    if (printerStatusDisabled) {
-        showToast('OctoPrintサービスが無効です', 'warning');
-        return;
-    }
+    
+    const commands = commandsText.split('\n').map(c => c.trim()).filter(c => c);
+    
     try {
-        setPrinterMessage('プリンターへ一時停止を送信中...', 'info');
-        const response = await fetch('/api/printer/pause', { method: 'POST' });
-        const payload = await response.json().catch(() => ({}));
-        if (!response.ok) {
-            throw new Error(payload.detail || payload.message || '一時停止に失敗しました');
+        const resp = await fetch('/api/printer/macro', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({name, commands})
+        });
+        const data = await resp.json();
+        showToast(data.message || 'マクロ保存', data.status === 'ok' ? 'success' : 'error');
+        
+        if (data.status === 'ok') {
+            toggleMacroForm();
+            loadMacros();
         }
-        showToast(payload.message || 'プリントを一時停止しました', 'success');
-        fetchPrinterStatus();
-    } catch (error) {
-        console.error('プリンター一時停止エラー:', error);
-        showToast(error.message, 'error');
+    } catch (err) {
+        showToast('マクロ保存エラー', 'error');
     }
 }
 
-async function resumePrinterJob() {
-    if (printerStatusDisabled) {
-        showToast('OctoPrintサービスが無効です', 'warning');
-        return;
-    }
-    try {
-        setPrinterMessage('プリンターへ再開を送信中...', 'info');
-        const response = await fetch('/api/printer/resume', { method: 'POST' });
-        const payload = await response.json().catch(() => ({}));
-        if (!response.ok) {
-            throw new Error(payload.detail || payload.message || '再開に失敗しました');
-        }
-        showToast(payload.message || 'プリントを再開しました', 'success');
-        fetchPrinterStatus();
-    } catch (error) {
-        console.error('プリンター再開エラー:', error);
-        showToast(error.message, 'error');
-    }
-}
-
-
-async function presentPrinterBed() {
-    if (printerStatusDisabled) {
-        showToast('OctoPrintサービスが無効です', 'warning');
-        return;
-    }
-    try {
-        setPrinterMessage('ベッドを移動中...', 'info');
-        const response = await fetch('/api/printer/present_bed', { method: 'POST' });
-        const payload = await response.json().catch(() => ({}));
-        if (!response.ok) {
-            throw new Error(payload.detail || payload.message || '移動に失敗しました');
-        }
-        showToast(payload.message || 'ベッドを前に出しました', 'success');
-    } catch (error) {
-        console.error('ベッド移動エラー:', error);
-        showToast(error.message, 'error');
-    }
-}
+// 初期化処理の拡張
+const originalOnload = window.onload;
+window.onload = function() {
+    if (originalOnload) originalOnload();
+    
+    // プリンター関連の初期化
+    startPrinterMonitor();
+    refreshFiles();
+    loadMacros();
+};

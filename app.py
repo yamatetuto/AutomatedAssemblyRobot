@@ -435,6 +435,21 @@ async def printer_resume():
 
 
 
+@app.post("/api/printer/present_bed")
+async def printer_present_bed():
+    """ベッドを前に出す"""
+    if not printer_manager:
+        raise HTTPException(status_code=503, detail="3Dプリンターサービスが起動していません")
+    try:
+        await printer_manager.present_bed()
+        return {"status": "ok", "message": "ベッドを前に出しました"}
+    except OctoPrintError as e:
+        raise HTTPException(status_code=502, detail=str(e))
+    except Exception as e:
+        logger.error(f"ベッド移動エラー: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 # グリッパーAPI
 @app.get("/api/gripper/status")
 async def gripper_status():

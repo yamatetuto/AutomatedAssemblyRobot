@@ -125,12 +125,18 @@ Bprt: レスポンスメッセージのバイト数 + 8
 - **DSSE (0x9007)**
   - bit 5: MOVE（移動中信号）
 
+## デバイス名固定
+`/etc/udev/rules.d/99-usb.rules`に以下の項目追加し、デバイス名を`/dev/gripper`に固定
+```
+SUBSYSTEM=="tty", ATTRS{idVendor}=="10c4", ATTRS{idProduct}=="81d7", SYMLINK+="gripper", MODE="0666"
+```
+
 ## 設定
 
 環境変数で動作をカスタマイズできます:
 
 ```bash
-export GRIPPER_PORT=/dev/ttyUSB0
+export GRIPPER_PORT=/dev/gripper
 export GRIPPER_BAUDRATE=38400
 export GRIPPER_SLAVE_ADDR=1
 ```

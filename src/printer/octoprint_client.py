@@ -68,6 +68,37 @@ class OctoPrintClient:
     async def get_printer_state(self) -> Dict[str, Any]:
         return await self._request("GET", "/api/printer")
 
+    async def get_connection(self) -> Dict[str, Any]:
+        """接続状態を取得"""
+        return await self._request("GET", "/api/connection")
+
+    async def connect(
+        self,
+        port: Optional[str] = None,
+        baudrate: Optional[int] = None,
+        printer_profile: Optional[str] = None,
+        save: bool = True,
+        autoconnect: bool = False,
+    ) -> None:
+        """プリンターに接続"""
+        payload: Dict[str, Any] = {
+            "command": "connect",
+            "save": save,
+            "autoconnect": autoconnect,
+        }
+        if port:
+            payload["port"] = port
+        if baudrate:
+            payload["baudrate"] = baudrate
+        if printer_profile:
+            payload["printerProfile"] = printer_profile
+
+        await self._request("POST", "/api/connection", json=payload)
+
+    async def disconnect(self) -> None:
+        """プリンターから切断"""
+        await self._request("POST", "/api/connection", json={"command": "disconnect"})
+
     async def send_gcode(self, command: str) -> None:
         payload = {"command": command}
         await self._request("POST", "/api/printer/command", json=payload)
@@ -99,4 +130,3 @@ class OctoPrintClient:
             except OctoPrintError as e:
                 logger.warning("ジョブキャンセルに失敗: %s", e)
             await self.send_gcode_batch(["M112", "M104 S0", "M140 S0", "M84"])  # 緊急停止 + ヒーターOFF + モーターOFF
-

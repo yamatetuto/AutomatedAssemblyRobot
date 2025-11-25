@@ -303,18 +303,18 @@ class CONController:
 
     def get_current_position(self):
         """現在位置をmm単位で取得。"""
-        print("\n4. 現在位置を読み出します...")
+        # print("\n4. 現在位置を読み出します...")
         pos_raw = self.instrument.read_long(self.REG_CURRENT_POS, functioncode=3, signed=True)
         pos_mm = pos_raw / 100.0
-        print(f"   読み出し成功！ 現在位置: {pos_mm:.2f} mm")
+        # print(f"   読み出し成功！ 現在位置: {pos_mm:.2f} mm")
         return pos_mm
 
     def get_current_mA(self):
         """モーターの現在電流値をmA単位で取得。(資料 p.135)"""
-        print("\n4c. 現在のモーター電流値を読み出します...")
+        # print("\n4c. 現在のモーター電流値を読み出します...")
         try:
             current_raw = self.instrument.read_long(self.REG_CURRENT_VALUE, functioncode=3, signed=False)
-            print(f"   読み出し成功！ 現在電流値: {current_raw} mA")
+            # print(f"   読み出し成功！ 現在電流値: {current_raw} mA")
             return current_raw
         except Exception as e:
             print(f"   [Error] 電流値の読み出しに失敗しました: {e}")
@@ -322,10 +322,11 @@ class CONController:
 
     def get_current_alarm(self):
         """現在発生中のアラームコードを取得。"""
-        print("\n4b. 現在発生中のアラームを確認します...")
+        # print("\n4b. 現在発生中のアラームを確認します...")
         alarm_code = self.instrument.read_register(self.REG_CURRENT_ALARM, functioncode=3)
         if alarm_code == 0:
-            print("   アラームはありません。正常です。")
+            # print("   アラームはありません。正常です。")
+            pass
         else:
             print(f"   アラーム発生！ コード: {alarm_code} ({alarm_code:04X}H)")
         return alarm_code
