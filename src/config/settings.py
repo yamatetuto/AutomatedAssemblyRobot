@@ -35,7 +35,7 @@ POSITION_TABLE_FILE = PROJECT_ROOT / 'position_table.json'
 
 # OctoPrint設定
 OCTOPRINT_URL = os.getenv('OCTOPRINT_URL', 'http://127.0.0.1:5000')
-OCTOPRINT_API_KEY = os.getenv('OCTOPRINT_API_KEY', 'bE5x6jq3nN6dJvULZ7KFMmUSKQ-FFS4itXN6rBQP31E')
+OCTOPRINT_API_KEY = os.getenv('OCTOPRINT_API_KEY')
 OCTOPRINT_POLL_INTERVAL = float(os.getenv('OCTOPRINT_POLL_INTERVAL', '5.0'))
 
 # プリンター接続設定 (Noneの場合はAUTO)
