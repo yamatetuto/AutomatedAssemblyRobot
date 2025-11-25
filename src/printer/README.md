@@ -30,19 +30,23 @@ FastAPI (`app.py`) のライフサイクルでこれらが検出されると `Pr
 ## 機能サマリ
 - **ステータス監視**: `/api/printer/status` から進捗・ETA・温度・状態メッセージを返却。
 - **制御系エンドポイント**: `/api/printer/pause`・`/api/printer/resume` を通じてジョブの一時停止/再開をトリガー。
+- **高度な一時停止/再開ロジック**:
+  - **一時停止**: `M114` コマンドと `serial.log` 解析により現在位置を正確に取得・保存。その後、Z軸を上昇させベッドを前方に移動（プレゼンテーションモード）。
+  - **再開**: 保存された位置情報に基づき、まずXY軸を復帰させ、その後にZ軸を下降させることで造形物への衝突を回避。
 - **ジョブ管理**: `PrinterManager` API 経由で `start_job`, `cancel_job`, `send_command`, `estop`, `macro` 実行を提供 (必要に応じて FastAPI へ公開可能)。
 - **状態キャッシュ**: 監視タスクが OctoPrint のレスポンスを `_status` に保持し、UI からの頻繁なポーリングでも API 呼び出し回数を抑制。
 
 ## 使い方
 1. OctoPrint 側で API Key を発行し、Raspberry Pi から到達できることを確認します。
-2. 環境変数を設定しアプリを起動:
+2. **OctoPrintの設定でシリアルログ (`serial.log`) を有効にします**（一時停止時の位置取得に必須）。
+3. 環境変数を設定しアプリを起動:
    ```bash
    export OCTOPRINT_URL="http://10.32.77.150:5000"
    export OCTOPRINT_API_KEY="xxxxxxxxxxxxxxxx"
    # 任意: export OCTOPRINT_POLL_INTERVAL=3.0
    python app.py
    ```
-3. Web UI の真ん中カラム「3Dプリンター」パネルで進捗・温度を確認し、必要に応じて一時停止/再開ボタンを使用します。
+4. Web UI の真ん中カラム「3Dプリンター」パネルで進捗・温度を確認し、必要に応じて一時停止/再開ボタンを使用します。
 
 ## 開発メモ
 - 構文チェック: `python -m compileall src/printer`。
