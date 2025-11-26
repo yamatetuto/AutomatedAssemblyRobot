@@ -986,3 +986,33 @@ function showVisionResult(result, title) {
     dataDiv.innerHTML = infoHtml;
     modal.show();
 }
+
+// Override showVisionResult to work with custom modal
+function showVisionResult(result, title) {
+    const modal = document.getElementById('visionModal');
+    const img = document.getElementById('visionResultImage');
+    const dataDiv = document.getElementById('visionResultData');
+    
+    modal.style.display = 'flex';
+    
+    if (result.image_base64) {
+        img.src = 'data:image/jpeg;base64,' + result.image_base64;
+        img.style.display = 'block';
+    } else {
+        img.style.display = 'none';
+    }
+    
+    let infoHtml = '<strong>Detected:</strong> ' + (result.detected ? 'Yes' : 'No') + '<br>';
+    if (result.detected) {
+        infoHtml += '<strong>Count:</strong> ' + result.count + '<br>';
+        if (result.offset) {
+            if (typeof result.offset === 'number') {
+                infoHtml += '<strong>Offset:</strong> ' + result.offset.toFixed(2) + ' px<br>';
+            } else {
+                infoHtml += '<strong>Offset:</strong> X=' + result.offset.dx.toFixed(2) + ', Y=' + result.offset.dy.toFixed(2) + ' px<br>';
+            }
+        }
+    }
+    
+    dataDiv.innerHTML = infoHtml;
+}
