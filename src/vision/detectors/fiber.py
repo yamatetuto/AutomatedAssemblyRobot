@@ -3,6 +3,12 @@ import cv2
 import numpy as np
 import math
 from .base import BaseDetector
+from src.config.settings import (
+    VISION_FIBER_CANNY_THRESHOLD1,
+    VISION_FIBER_CANNY_THRESHOLD2,
+    VISION_FIBER_MIN_LINE_LENGTH,
+    VISION_FIBER_MAX_LINE_GAP
+)
 
 class FiberDetector(BaseDetector):
     """
@@ -10,7 +16,11 @@ class FiberDetector(BaseDetector):
     2本の平行線を検出し、その中心線と画像中心との距離を計算する
     """
     
-    def __init__(self, canny_threshold1: int = 50, canny_threshold2: int = 150, min_line_length: int = 100, max_line_gap: int = 10):
+    def __init__(self, 
+                 canny_threshold1: int = VISION_FIBER_CANNY_THRESHOLD1, 
+                 canny_threshold2: int = VISION_FIBER_CANNY_THRESHOLD2, 
+                 min_line_length: int = VISION_FIBER_MIN_LINE_LENGTH, 
+                 max_line_gap: int = VISION_FIBER_MAX_LINE_GAP):
         self.canny_threshold1 = canny_threshold1
         self.canny_threshold2 = canny_threshold2
         self.min_line_length = min_line_length

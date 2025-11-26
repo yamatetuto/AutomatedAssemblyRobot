@@ -3,13 +3,25 @@ import cv2
 import numpy as np
 import math
 from .base import BaseDetector
+from src.config.settings import (
+    VISION_BEAD_MIN_DIST,
+    VISION_BEAD_PARAM1,
+    VISION_BEAD_PARAM2,
+    VISION_BEAD_MIN_RADIUS,
+    VISION_BEAD_MAX_RADIUS
+)
 
 class BeadDetector(BaseDetector):
     """
     丸い物体（ガラス玉など）を検出するクラス
     """
     
-    def __init__(self, min_dist: int = 20, param1: int = 50, param2: int = 30, min_radius: int = 10, max_radius: int = 50):
+    def __init__(self, 
+                 min_dist: int = VISION_BEAD_MIN_DIST, 
+                 param1: int = VISION_BEAD_PARAM1, 
+                 param2: int = VISION_BEAD_PARAM2, 
+                 min_radius: int = VISION_BEAD_MIN_RADIUS, 
+                 max_radius: int = VISION_BEAD_MAX_RADIUS):
         self.min_dist = min_dist
         self.param1 = param1
         self.param2 = param2
