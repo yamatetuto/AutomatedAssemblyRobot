@@ -593,33 +593,6 @@ async def gripper_grip_status(target_position: int = None):
         logger.error(f"把持状態判定エラー: {e}")
         raise HTTPException(status_code=503, detail=str(e))
 
-
-# シグナルハンドラー
-def signal_handler(signum, frame):
-    """シグナルハンドラー（Ctrl+C対応）"""
-    logger.info("終了シグナルを受信しました")
-    import sys
-    sys.exit(0)
-
-
-signal.signal(signal.SIGINT, signal_handler)
-signal.signal(signal.SIGTERM, signal_handler)
-
-
-if __name__ == "__main__":
-    import uvicorn
-    
-    logger.info("=" * 60)
-    logger.info("自動組み立てロボット制御システム")
-    logger.info("=" * 60)
-    
-    uvicorn.run(
-        app,
-        host="0.0.0.0",
-        port=8080,
-        log_level="info"
-    )
-
 # 画像処理API
 @app.post("/api/vision/detect/fiber")
 async def detect_fiber():
@@ -654,3 +627,30 @@ async def detect_bead():
     except Exception as e:
         logger.error(f"ビーズ検出エラー: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+# シグナルハンドラー
+def signal_handler(signum, frame):
+    """シグナルハンドラー（Ctrl+C対応）"""
+    logger.info("終了シグナルを受信しました")
+    import sys
+    sys.exit(0)
+
+
+signal.signal(signal.SIGINT, signal_handler)
+signal.signal(signal.SIGTERM, signal_handler)
+
+
+if __name__ == "__main__":
+    import uvicorn
+    
+    logger.info("=" * 60)
+    logger.info("自動組み立てロボット制御システム")
+    logger.info("=" * 60)
+    
+    uvicorn.run(
+        app,
+        host="0.0.0.0",
+        port=8080,
+        log_level="info"
+    )
+

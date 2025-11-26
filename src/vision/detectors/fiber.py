@@ -92,17 +92,7 @@ class FiberDetector(BaseDetector):
             cy2 = int(center_mid[1] + length * math.sin(angle))
             center_line = ((cx1, cy1), (cx2, cy2))
 
-            # 画像中心からの距離 (点と直線の距離)
-            # 直線の方程式 ax + by + c = 0
-            # m = tan(angle) => y - y0 = m(x - x0) => mx - y + (y0 - mx0) = 0
-            # a = m, b = -1, c = y0 - mx0
-            # ただし垂直に近い場合は別途考慮が必要だが、ここでは一般形を使う
-            
-            # ベクトルによる距離計算 (符号付き)
-            # 中心線上の点 P(center_mid) と方向ベクトル V(cos, sin)
-            # 画像中心 C から直線へのベクトル PC = C - P
-            # 距離 = PC と 法線ベクトル N(-sin, cos) の内積
-            
+            # 画像中心から直線への最短距離ベクトルを計算
             vx = math.cos(angle)
             vy = math.sin(angle)
             nx = -vy
@@ -111,7 +101,14 @@ class FiberDetector(BaseDetector):
             pc_x = image_center[0] - center_mid[0]
             pc_y = image_center[1] - center_mid[1]
             
-            offset = pc_x * nx + pc_y * ny
+            # 中心から直線までの符号付き距離
+            dist = pc_x * nx + pc_y * ny
+            
+            # オフセット (dx, dy) = -dist * N
+            dx = -dist * nx
+            dy = -dist * ny
+            
+            offset = {"dx": dx, "dy": dy}
 
         elif len(detected_lines) == 1:
              # 1本だけの場合はその線を中心線とする
@@ -119,7 +116,6 @@ class FiberDetector(BaseDetector):
              center_line = line
              paired_lines = [line]
              
-             # 距離計算 (同上)
              mid = ((line[0][0] + line[1][0]) / 2, (line[0][1] + line[1][1]) / 2)
              angle = math.atan2(line[1][1] - line[0][1], line[1][0] - line[0][0])
              
@@ -131,7 +127,12 @@ class FiberDetector(BaseDetector):
              pc_x = image_center[0] - mid[0]
              pc_y = image_center[1] - mid[1]
              
-             offset = pc_x * nx + pc_y * ny
+             dist = pc_x * nx + pc_y * ny
+             
+             dx = -dist * nx
+             dy = -dist * ny
+             
+             offset = {"dx": dx, "dy": dy}
 
         return {
             "detected": len(detected_lines) > 0,

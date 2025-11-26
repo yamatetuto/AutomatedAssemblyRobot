@@ -46,6 +46,14 @@ class VisionManager:
             if result["center_line"]:
                 cl = result["center_line"]
                 cv2.line(output_image, cl[0], cl[1], (0, 0, 255), 2)
+            
+            # オフセット線 (黄色)
+            if result["offset"]:
+                dx = result["offset"]["dx"]
+                dy = result["offset"]["dy"]
+                target_point = (int(center[0] + dx), int(center[1] + dy))
+                cv2.line(output_image, center, target_point, (0, 255, 255), 2)
+                cv2.circle(output_image, target_point, 4, (0, 255, 255), -1)
                 
         result["image_base64"] = self._encode_image(output_image)
         return result
