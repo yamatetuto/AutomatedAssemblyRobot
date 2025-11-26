@@ -29,10 +29,10 @@
 - [x] **統合Web UI** - FastAPI + WebRTC対応制御画面
 - [x] **モジュール化アーキテクチャ** - 再利用可能なコンポーネント設計
 - [x] **Modbus排他制御** - asyncio.Lock()による通信の安定化
+- [x] **3Dプリンター制御** (OctoPrint API) - 状態監視、一時停止/再開(退避動作付)
 
 ### 🚧 実装中
 - [ ] 電流値取得の安定化（Modbusタイムアウト対策）
-- [ ] 3Dプリンター制御 (OctoPrint API)
 - [ ] ディスペンサー制御 (GPIO)
 - [ ] 画像処理・物体検出
 - [ ] ロボットアーム統合
@@ -340,6 +340,7 @@ sudo ufw allow 8080
 - パフォーマンス最適化（同期的Modbus通信）
 
 **v2.2**: Modbus排他制御実装
+- [x] **3Dプリンター制御** (OctoPrint API) - 状態監視、一時停止/再開(退避動作付)
 - `asyncio.Lock()`による通信の競合解消
 - すべてのModbus操作を非同期化
 - 安定性と応答性の向上
@@ -361,6 +362,7 @@ from src.config.settings import *
 ```
 
 ### Modbus排他制御の仕組み
+- [x] **3Dプリンター制御** (OctoPrint API) - 状態監視、一時停止/再開(退避動作付)
 
 GripperManagerクラスで`asyncio.Lock()`を使用:
 
@@ -456,6 +458,7 @@ class GripperManager:
   - 成功/失敗/警告/移動中の4状態判定
   - LEDインジケーターUI実装
 - **Modbus排他制御実装**
+- [x] **3Dプリンター制御** (OctoPrint API) - 状態監視、一時停止/再開(退避動作付)
   - `asyncio.Lock()`による通信競合の解消
   - すべてのModbus操作を非同期化（`asyncio.to_thread()`）
   - タイムアウトエラーの削減

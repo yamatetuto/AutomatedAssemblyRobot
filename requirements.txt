@@ -8,8 +8,6 @@ numpy==1.24.3
 minimalmodbus==2.1.1
 pyserial==3.5
 
-# プリンター制御
-requests==2.31.0
 
 # ディスペンサー制御
 RPi.GPIO==0.7.1
