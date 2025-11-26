@@ -31,6 +31,7 @@ from src.config.settings import (
 )
 from src.printer.octoprint_client import OctoPrintClient, OctoPrintError
 from src.printer.printer_manager import PrinterManager
+from src.vision.manager import VisionManager
 
 # ロギング設定
 logging.basicConfig(
@@ -44,13 +45,14 @@ camera_manager: Optional[CameraManager] = None
 gripper_manager: Optional[GripperManager] = None
 webrtc_manager: Optional[WebRTCManager] = None
 printer_manager: Optional[PrinterManager] = None
+vision_manager: Optional[VisionManager] = None
 
 
 # Lifespan context manager
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """アプリケーションのライフサイクル管理"""
-    global camera_manager, gripper_manager, webrtc_manager, printer_manager
+    global camera_manager, gripper_manager, webrtc_manager, printer_manager, vision_manager
     
     logger.info("🚀 アプリケーションを起動中...")
     
@@ -80,6 +82,14 @@ async def lifespan(app: FastAPI):
         logger.error(f"❌ WebRTCサービス起動失敗: {e}")
         webrtc_manager = None
     
+    # 画像処理初期化
+    try:
+        vision_manager = VisionManager()
+        logger.info("✅ 画像処理サービス起動")
+    except Exception as e:
+        logger.error(f"❌ 画像処理サービス起動失敗: {e}")
+        vision_manager = None
+
     # 3Dプリンター初期化
     if OCTOPRINT_URL and OCTOPRINT_API_KEY:
         printer_client: Optional[OctoPrintClient] = None
@@ -609,3 +619,38 @@ if __name__ == "__main__":
         port=8080,
         log_level="info"
     )
+
+# 画像処理API
+@app.post("/api/vision/detect/fiber")
+async def detect_fiber():
+    """ファイバー検出を実行"""
+    if not camera_manager or not vision_manager:
+        raise HTTPException(status_code=503, detail="サービスが利用できません")
+    
+    frame = camera_manager.get_frame()
+    if frame is None:
+        raise HTTPException(status_code=500, detail="画像の取得に失敗しました")
+    
+    try:
+        result = vision_manager.detect_fiber(frame)
+        return result
+    except Exception as e:
+        logger.error(f"ファイバー検出エラー: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/vision/detect/bead")
+async def detect_bead():
+    """ビーズ検出を実行"""
+    if not camera_manager or not vision_manager:
+        raise HTTPException(status_code=503, detail="サービスが利用できません")
+    
+    frame = camera_manager.get_frame()
+    if frame is None:
+        raise HTTPException(status_code=500, detail="画像の取得に失敗しました")
+    
+    try:
+        result = vision_manager.detect_bead(frame)
+        return result
+    except Exception as e:
+        logger.error(f"ビーズ検出エラー: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
