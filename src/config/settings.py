@@ -46,16 +46,27 @@ PRINTER_BAUDRATE = os.getenv('PRINTER_BAUDRATE', None)  # 例: 115200
 PRINTER_BED_WIDTH = int(os.getenv('PRINTER_BED_WIDTH', '220'))
 PRINTER_BED_DEPTH = int(os.getenv('PRINTER_BED_DEPTH', '220'))
 
+
 # 画像処理設定 (Vision)
+
 # ファイバー検出 (Fiber Detection)
+# Cannyエッジ検出のヒステリシス閾値1（最小値）。これ以下の勾配はエッジとみなされない。
 VISION_FIBER_CANNY_THRESHOLD1 = int(os.getenv('VISION_FIBER_CANNY_THRESHOLD1', '50'))
+# Cannyエッジ検出のヒステリシス閾値2（最大値）。これ以上の勾配は確実にエッジとみなされる。
 VISION_FIBER_CANNY_THRESHOLD2 = int(os.getenv('VISION_FIBER_CANNY_THRESHOLD2', '150'))
+# 検出する直線の最小長さ（ピクセル）。これより短い線分は棄却される。
 VISION_FIBER_MIN_LINE_LENGTH = int(os.getenv('VISION_FIBER_MIN_LINE_LENGTH', '100'))
+# 同一直線とみなす線分間の最大隙間（ピクセル）。これ以下の隙間は埋められる。
 VISION_FIBER_MAX_LINE_GAP = int(os.getenv('VISION_FIBER_MAX_LINE_GAP', '10'))
 
 # ビーズ検出 (Bead Detection)
+# 検出される円の中心間の最小距離。これより近い円は除外される（重複検出防止）。
 VISION_BEAD_MIN_DIST = int(os.getenv('VISION_BEAD_MIN_DIST', '20'))
+# Cannyエッジ検出器の高い方の閾値（HoughCircles内部で使用）。低い方はこの半分になる。
 VISION_BEAD_PARAM1 = int(os.getenv('VISION_BEAD_PARAM1', '50'))
+# 円の中心検出の閾値。小さいほど多くの（誤検出含む）円が検出され、大きいほど真円に近いものだけが検出される。
 VISION_BEAD_PARAM2 = int(os.getenv('VISION_BEAD_PARAM2', '30'))
+# 検出する円の最小半径。
 VISION_BEAD_MIN_RADIUS = int(os.getenv('VISION_BEAD_MIN_RADIUS', '10'))
+# 検出する円の最大半径。
 VISION_BEAD_MAX_RADIUS = int(os.getenv('VISION_BEAD_MAX_RADIUS', '50'))
