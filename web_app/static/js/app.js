@@ -935,3 +935,54 @@ async function presentPrinterBed() {
         showToast(error.message, 'error');
     }
 }
+
+// Vision Detection Functions
+async function detectFiber() {
+    try {
+        const response = await fetch('/api/vision/detect/fiber', { method: 'POST' });
+        const result = await response.json();
+        showVisionResult(result, 'Fiber Detection');
+    } catch (error) {
+        console.error('Error detecting fiber:', error);
+        showToast('Error detecting fiber', 'error');
+    }
+}
+
+async function detectBead() {
+    try {
+        const response = await fetch('/api/vision/detect/bead', { method: 'POST' });
+        const result = await response.json();
+        showVisionResult(result, 'Bead Detection');
+    } catch (error) {
+        console.error('Error detecting bead:', error);
+        showToast('Error detecting bead', 'error');
+    }
+}
+
+function showVisionResult(result, title) {
+    const modal = new bootstrap.Modal(document.getElementById('visionModal'));
+    const img = document.getElementById('visionResultImage');
+    const dataDiv = document.getElementById('visionResultData');
+    
+    if (result.image_base64) {
+        img.src = 'data:image/jpeg;base64,' + result.image_base64;
+        img.style.display = 'block';
+    } else {
+        img.style.display = 'none';
+    }
+    
+    let infoHtml = '<strong>Detected:</strong> ' + (result.detected ? 'Yes' : 'No') + '<br>';
+    if (result.detected) {
+        infoHtml += '<strong>Count:</strong> ' + result.count + '<br>';
+        if (result.offset) {
+            if (typeof result.offset === 'number') {
+                infoHtml += '<strong>Offset:</strong> ' + result.offset.toFixed(2) + ' px<br>';
+            } else {
+                infoHtml += '<strong>Offset:</strong> X=' + result.offset.dx.toFixed(2) + ', Y=' + result.offset.dy.toFixed(2) + ' px<br>';
+            }
+        }
+    }
+    
+    dataDiv.innerHTML = infoHtml;
+    modal.show();
+}
