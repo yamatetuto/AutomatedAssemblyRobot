@@ -98,3 +98,9 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
+
+
+# その他
+backup/
+.github/
+docs/
