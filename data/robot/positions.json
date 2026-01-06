@@ -1,0 +1,21 @@
+{
+  "data_type": "SPLEBO-N.POS",
+  "version": "1.00",
+  "timestamp": "2026/01/06 00:00:00",
+  "positions": [
+    {
+      "point_no": 1,
+      "x": 0.0,
+      "y": 0.0,
+      "z": 0.0,
+      "u": 0.0,
+      "s1": 0.0,
+      "s2": 0.0,
+      "a": 0.0,
+      "b": 0.0,
+      "is_absolute": true,
+      "is_protected": false,
+      "comment": "Home Position"
+    }
+  ]
+}

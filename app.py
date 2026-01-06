@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Optional
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, WebSocket
 from fastapi.responses import HTMLResponse, FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -28,10 +28,19 @@ from src.config.settings import (
     OCTOPRINT_URL,
     OCTOPRINT_API_KEY,
     OCTOPRINT_POLL_INTERVAL,
+    ROBOT_SIMULATION_MODE,
 )
 from src.printer.octoprint_client import OctoPrintClient, OctoPrintError
 from src.printer.printer_manager import PrinterManager
 from src.vision.manager import VisionManager
+
+# SPLEBO-N ロボット制御モジュール
+from src.robot import (
+    RobotManager,
+    create_robot_router,
+    RobotWebSocketManager,
+    create_robot_manager,
+)
 
 # ロギング設定
 logging.basicConfig(
@@ -46,6 +55,8 @@ gripper_manager: Optional[GripperManager] = None
 webrtc_manager: Optional[WebRTCManager] = None
 printer_manager: Optional[PrinterManager] = None
 vision_manager: Optional[VisionManager] = None
+robot_manager: Optional[RobotManager] = None
+robot_ws_manager: Optional[RobotWebSocketManager] = None
 
 
 # Lifespan context manager
@@ -53,8 +64,26 @@ vision_manager: Optional[VisionManager] = None
 async def lifespan(app: FastAPI):
     """アプリケーションのライフサイクル管理"""
     global camera_manager, gripper_manager, webrtc_manager, printer_manager, vision_manager
+    global robot_manager, robot_ws_manager
     
     logger.info("🚀 アプリケーションを起動中...")
+    
+    # SPLEBO-Nロボット初期化
+    try:
+        robot_manager = create_robot_manager(simulation_mode=ROBOT_SIMULATION_MODE)
+        await robot_manager.initialize()
+        robot_ws_manager = RobotWebSocketManager(robot_manager)
+        
+        # ロボットAPIルーターを登録
+        robot_router = create_robot_router(robot_manager)
+        app.include_router(robot_router, prefix="/api/robot", tags=["robot"])
+        
+        mode_str = "シミュレーション" if ROBOT_SIMULATION_MODE else "実機"
+        logger.info(f"✅ SPLEBO-Nロボットサービス起動 ({mode_str}モード)")
+    except Exception as e:
+        logger.error(f"❌ SPLEBO-Nロボットサービス起動失敗: {e}")
+        robot_manager = None
+        robot_ws_manager = None
     
     # カメラ初期化
     try:
@@ -131,6 +160,14 @@ async def lifespan(app: FastAPI):
     if printer_manager:
         await printer_manager.stop()
     
+    # SPLEBO-Nロボットシャットダウン
+    if robot_ws_manager:
+        await robot_ws_manager.shutdown()
+    
+    if robot_manager:
+        await robot_manager.shutdown()
+        logger.info("✅ SPLEBO-Nロボットサービス停止")
+    
     logger.info("👋 すべてのサービスを停止しました")
 
 
@@ -161,6 +198,29 @@ class PositionData(BaseModel):
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request):
     """メインページ"""
+
+
+# =============================================================================
+# SPLEBO-N ロボット WebSocket エンドポイント
+# =============================================================================
+
+@app.websocket("/ws/robot")
+async def robot_websocket(websocket: WebSocket):
+    """
+    SPLEBO-Nロボットリアルタイム状態WebSocket
+    
+    クライアントに対して100msごとにロボット状態を配信します。
+    
+    メッセージタイプ:
+        - status: 現在の状態（位置、エラー、モード等）
+        - event: イベント通知（移動完了、原点復帰完了等）
+        - error: エラー通知
+    """
+    if robot_ws_manager is None:
+        await websocket.close(code=1013, reason="Robot service not available")
+        return
+    
+    await robot_ws_manager.handle_connection(websocket)
     return templates.TemplateResponse("index_webrtc_fixed.html", {"request": request})
 
 

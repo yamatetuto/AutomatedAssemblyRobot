@@ -1,17 +1,19 @@
 # Camera Module
 
-Intel RealSense D435カメラ制御モジュール
+OpenCV + V4L2 カメラ制御モジュール
 
 ## 概要
 
-このモジュールは、Intel RealSense D435深度カメラのRGB画像とDepth画像を取得する機能を提供します。
+このモジュールは、USB Webカメラ（Logitech C922 Pro等）をOpenCV + V4L2バックエンドで制御し、WebRTCストリーミング用のフレームを提供します。
 
 ### 主な機能
 
-- **RGB画像取得**: 1920×1080、30FPS
-- **Depth画像取得**: 640×480、30FPS（視差マップ）
-- **非同期処理**: asyncioによる非ブロッキング画像取得
-- **自動リソース管理**: コンテキストマネージャー対応
+- **リアルタイムキャプチャ**: 非同期バックグラウンドループによる連続フレーム取得
+- **自動再接続**: カメラ切断時の自動復旧
+- **解像度対応**: 320×240 〜 1920×1080（高解像度時はFPS自動調整）
+- **コーデック選択**: MJPEG / YUYV 対応
+- **V4L2コントロール**: 明るさ、コントラスト、露出、フォーカス等の動的調整
+- **スナップショット**: タイムスタンプ付き画像保存
 
 ## ファイル構成
 
@@ -33,60 +35,83 @@ from src.camera.camera_manager import CameraManager
 camera = CameraManager()
 await camera.start()
 
-# RGB画像取得
-rgb_image = await camera.get_color_frame()
-print(f"RGB画像サイズ: {rgb_image.shape}")  # (1080, 1920, 3)
+# 現在のフレーム取得
+frame = camera.get_frame()
+if frame is not None:
+    print(f"フレームサイズ: {frame.shape}")  # (480, 640, 3)
 
-# Depth画像取得
-depth_image = await camera.get_depth_frame()
-print(f"Depth画像サイズ: {depth_image.shape}")  # (480, 640)
+# スナップショット撮影
+result = await camera.take_snapshot()
+print(f"保存先: {result['path']}")
 
 # カメラ停止
 await camera.stop()
 ```
 
-### コンテキストマネージャーを使った使い方
+### カメラコントロールの取得と設定
 
 ```python
-async with CameraManager() as camera:
-    rgb = await camera.get_color_frame()
-    depth = await camera.get_depth_frame()
-    # 自動的にstop()が呼ばれる
+# 利用可能なコントロール一覧を取得
+controls = camera.get_controls()
+for name, info in controls.items():
+    print(f"{name}: {info['value']} (min={info['min']}, max={info['max']})")
+
+# コントロール値を設定
+await camera.set_control("brightness", 128)
+await camera.set_control("auto_exposure", 1)  # マニュアル露出
+
+# デフォルト値にリセット
+await camera.reset_controls()
 ```
 
-### 複数フレーム取得
+### 解像度・コーデック変更
 
 ```python
-camera = CameraManager()
-await camera.start()
+# 解像度変更
+await camera.set_resolution(1280, 720)
 
-for i in range(10):
-    rgb = await camera.get_color_frame()
-    depth = await camera.get_depth_frame()
-    # 画像処理...
-    await asyncio.sleep(0.1)  # 100ms間隔
-
-await camera.stop()
+# コーデック変更 (MJPEG推奨)
+await camera.set_fourcc("MJPG")
 ```
 
 ## 画像データ仕様
 
-### RGB画像
+### フレームデータ
 
 - **形式**: NumPy配列 (H, W, C)
-- **解像度**: 1920×1080
-- **チャンネル**: 3 (BGR順序)
+- **解像度**: 設定による（デフォルト 640×480）
+- **チャンネル**: 3 (BGR順序, OpenCV形式)
 - **データ型**: uint8
-- **フレームレート**: 30 FPS
+- **フレームレート**: 解像度に応じて自動調整
+  - 640×480: 最大30fps
+  - 1280×720: 最大20fps
+  - 1920×1080: 最大15fps
 
-### Depth画像
+### 対応コーデック
 
-- **形式**: NumPy配列 (H, W)
-- **解像度**: 640×480
-- **単位**: ミリメートル (mm)
-- **データ型**: uint16
-- **測定範囲**: 約0.3m〜3.0m
-- **フレームレート**: 30 FPS
+| コーデック | 説明 | CPU負荷 |
+|-----------|------|---------|
+| MJPG | Motion JPEG | 低 (推奨) |
+| YUYV | 非圧縮YUV | 高 |
+
+## V4L2コントロール一覧
+
+`get_controls()` で取得できる代表的なパラメータ:
+
+| コントロール名 | 型 | 説明 |
+|---------------|-----|------|
+| brightness | int | 明るさ |
+| contrast | int | コントラスト |
+| saturation | int | 彩度 |
+| sharpness | int | シャープネス |
+| gain | int | ゲイン |
+| exposure_auto | menu | 露出モード (1=Manual, 3=Auto) |
+| exposure_absolute | int | 露出時間 (マニュアル時) |
+| focus_auto | bool | オートフォーカス |
+| focus_absolute | int | フォーカス距離 |
+| white_balance_automatic | bool | 自動ホワイトバランス |
+| white_balance_temperature | int | 色温度 |
+| power_line_frequency | menu | 電源周波数 (0=Off, 1=50Hz, 2=60Hz) |
 
 ## API リファレンス
 
@@ -95,164 +120,83 @@ await camera.stop()
 #### メソッド
 
 ##### `__init__()`
-カメラマネージャーを初期化します。
+カメラマネージャーを初期化します。設定は `src/config/settings.py` から読み込みます。
 
 ##### `async start() -> None`
-カメラを起動し、ストリーミングを開始します。
-
-**例外**:
-- `RuntimeError`: カメラの起動に失敗した場合
+カメラキャプチャを開始します。バックグラウンドタスクでフレームを継続取得します。
 
 ##### `async stop() -> None`
-カメラを停止し、リソースを解放します。
+カメラキャプチャを停止し、リソースを解放します。
 
-##### `async get_color_frame() -> np.ndarray`
-RGB画像を取得します。
+##### `get_frame() -> Optional[np.ndarray]`
+最新のフレームを取得します。フレームがない場合はNoneを返します。
 
-**戻り値**: 
-- `np.ndarray`: shape=(1080, 1920, 3), dtype=uint8
+##### `is_opened() -> bool`
+カメラが接続されているか確認します。
 
-**例外**:
-- `RuntimeError`: カメラが起動していない場合
-- `TimeoutError`: フレーム取得タイムアウト（5秒）
+##### `async take_snapshot() -> Optional[Dict]`
+現在のフレームをJPEGファイルとして保存します。
 
-##### `async get_depth_frame() -> np.ndarray`
-Depth画像を取得します。
+##### `get_controls() -> Dict`
+V4L2コントロールの一覧と現在値を取得します。
 
-**戻り値**:
-- `np.ndarray`: shape=(480, 640), dtype=uint16
+##### `async set_control(name: str, value: int) -> bool`
+V4L2コントロールの値を設定します。
 
-**例外**:
-- `RuntimeError`: カメラが起動していない場合
-- `TimeoutError`: フレーム取得タイムアウト（5秒）
+##### `async set_resolution(width: int, height: int) -> bool`
+解像度を変更します（カメラ再起動が必要）。
 
-##### `async __aenter__() -> CameraManager`
-コンテキストマネージャーのエントリーポイント。
-
-##### `async __aexit__(*args) -> None`
-コンテキストマネージャーの終了処理。
+##### `async set_fourcc(fourcc: str) -> bool`
+コーデックを変更します（"MJPG" または "YUYV"）。
 
 ## 設定
 
-### RealSense設定
-
-カメラの解像度とフレームレートは`camera_manager.py`内で設定されています:
+カメラ設定は `src/config/settings.py` で環境変数から読み込みます:
 
 ```python
-# RGB設定
-config.enable_stream(
-    rs.stream.color,
-    1920, 1080,  # 解像度
-    rs.format.bgr8,
-    30  # FPS
-)
-
-# Depth設定
-config.enable_stream(
-    rs.stream.depth,
-    640, 480,  # 解像度
-    rs.format.z16,
-    30  # FPS
-)
+CAMERA_DEVICE = int(os.getenv('CAMERA_DEVICE', '0'))      # /dev/video番号
+CAMERA_WIDTH = int(os.getenv('CAMERA_WIDTH', '640'))      # 幅
+CAMERA_HEIGHT = int(os.getenv('CAMERA_HEIGHT', '480'))    # 高さ
+CAMERA_FPS = int(os.getenv('CAMERA_FPS', '30'))           # フレームレート
+CAMERA_FOURCC = os.getenv('CAMERA_FOURCC', 'MJPG')        # コーデック
 ```
-
-変更する場合は、`camera_manager.py`の該当箇所を編集してください。
 
 ## トラブルシューティング
 
-### "No RealSense devices detected"
+### "カメラを開けませんでした"
 
-**原因**: カメラが接続されていない、またはドライバー未インストール
-
-**対策**:
-1. USBケーブルの接続を確認
-2. `lsusb`でデバイスを確認（Intel Corp. が表示されるべき）
-3. librealsenseのインストール確認:
-   ```bash
-   python3 -c "import pyrealsense2; print(pyrealsense2.__version__)"
-   ```
-
-### "Failed to wait for frames"
-
-**原因**: フレーム取得タイムアウト
+**原因**: カメラが接続されていない、または権限不足
 
 **対策**:
-1. カメラのUSB3.0接続を確認（USB2.0では不安定な場合あり）
-2. カメラを再接続
-3. Raspberry Piを再起動
+1. カメラ接続を確認: `v4l2-ctl --list-devices`
+2. 権限を設定: `sudo usermod -a -G video $USER`
+3. ログアウト・ログインして権限を反映
 
-### 画像が真っ暗 / ノイズが多い
+### フレームレートが低い
 
-**原因**: 照明不足、レンズ汚れ、設定問題
+**原因**: 高解像度設定、YUYV使用、CPU負荷
 
 **対策**:
-1. 環境照明を確認
-2. レンズをクリーニング
-3. カメラの露出設定を調整（RealSense Viewerで確認可能）
+1. MJPEGコーデックを使用
+2. 解像度を下げる
+3. 不要なプロセスを停止
+
+### 画像が暗い / ホワイトバランスがおかしい
+
+**対策**:
+1. Web UIでカメラパラメータを調整
+2. オート設定をON/OFFで切り替える
+3. `v4l2-ctl` で直接設定を確認
 
 ## 依存関係
 
-- **pyrealsense2**: Intel RealSense SDK Python wrapper
-- **numpy**: 画像データ配列処理
+- **opencv-python**: カメラキャプチャと画像処理
+- **v4l-utils**: V4L2コントロール操作（システムパッケージ）
 - **asyncio**: 非同期処理
-
-インストール:
-```bash
-pip install pyrealsense2 numpy
-```
-
-## パフォーマンス
-
-### Raspberry Pi 4での実測値
-
-- RGB取得: 約30ms/フレーム
-- Depth取得: 約30ms/フレーム
-- 両方取得: 約33ms/フレーム（30FPS達成可能）
-
-### メモリ使用量
-
-- RGB画像1フレーム: 約6MB (1920×1080×3)
-- Depth画像1フレーム: 約0.6MB (640×480×2)
-
-## 開発者向け情報
-
-### 内部処理フロー
-
-1. `start()`: パイプライン設定 → ストリーミング開始
-2. `get_color_frame()` / `get_depth_frame()`:
-   - `wait_for_frames(timeout_ms=5000)` でフレーム待機
-   - `asyncio.to_thread()` で非同期実行
-   - NumPy配列に変換
-3. `stop()`: ストリーミング停止
-
-### スレッドセーフティ
-
-- RealSenseパイプラインは内部的にスレッドセーフ
-- `asyncio.to_thread()`により、ブロッキング操作を非同期化
-
-## 参考資料
-
-- [Intel RealSense D435仕様](https://www.intelrealsense.com/depth-camera-d435/)
-- [pyrealsense2ドキュメント](https://github.com/IntelRealSense/librealsense/tree/master/wrappers/python)
-- [RealSense SDK](https://github.com/IntelRealSense/librealsense)
 
 ---
 
-**最終更新**: 2025-11-10  
-**バージョン**: v1.0
-
-## ユニバーサルv4l2サポート (2025-11-12追加)
-
-### 概要
-すべてのv4l2対応カメラで利用可能な全コントロール型をサポートします。
-
-### サポートする型
-- **int**: 整数値（例: brightness, contrast）
-- **int64**: 64ビット整数値
-- **bool**: ブール値（例: auto_exposure）
-- **menu**: 選択肢（例: exposure_auto）
-- **button**: ボタン（例: reset）
-- **bitmask**: ビットマスク
+**最終更新**: 2026-01-06
 
 ### 機能
 

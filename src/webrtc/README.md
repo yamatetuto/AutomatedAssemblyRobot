@@ -4,22 +4,23 @@
 
 ## 概要
 
-このモジュールは、Intel RealSense D435カメラの映像をWebRTC経由でブラウザにストリーミングする機能を提供します。
+このモジュールは、CameraManagerからのフレームをWebRTC経由でブラウザにリアルタイムストリーミングする機能を提供します。aiortcライブラリを使用したPython実装です。
 
 ### 主な機能
 
-- **リアルタイムストリーミング**: RGB/Depthカメラ映像をWebブラウザに配信
-- **低遅延**: WebRTCプロトコルによる低遅延伝送
+- **リアルタイムストリーミング**: カメラ映像をWebブラウザに配信（遅延 約300ms）
+- **低遅延**: WebRTCプロトコルによるP2P通信
 - **aiortc**: Python WebRTC実装ライブラリ使用
-- **非同期処理**: FastAPIとの統合
+- **複数接続対応**: 複数ブラウザからの同時視聴
+- **自動リソース管理**: 接続切断時の自動クリーンアップ
 
 ## ファイル構成
 
 ```
 src/webrtc/
-├── __init__.py        # モジュール初期化
-├── webrtc_handler.py  # WebRTCセッション管理
-└── README.md          # このファイル
+├── __init__.py          # モジュール初期化
+├── webrtc_manager.py    # WebRTC接続管理クラス
+└── README.md            # このファイル
 ```
 
 ## 使用方法
@@ -28,25 +29,34 @@ src/webrtc/
 
 ```python
 from fastapi import FastAPI
-from src.webrtc.webrtc_handler import create_peer_connection
+from src.webrtc.webrtc_manager import WebRTCManager
+from src.camera.camera_manager import CameraManager
 
 app = FastAPI()
+camera_manager = CameraManager()
+webrtc_manager = WebRTCManager(camera_manager)
 
-@app.post("/offer")
-async def offer(sdp: dict):
-    pc = create_peer_connection()
-    # WebRTC SDP交換処理
-    await pc.setRemoteDescription(RTCSessionDescription(**sdp))
-    answer = await pc.createAnswer()
-    await pc.setLocalDescription(answer)
-    return {"sdp": pc.localDescription.sdp, "type": pc.localDescription.type}
+@app.post("/api/webrtc/offer")
+async def webrtc_offer(offer: dict):
+    """WebRTC Offerを受け取りAnswerを返す"""
+    answer = await webrtc_manager.create_offer(
+        sdp=offer["sdp"],
+        type=offer["type"]
+    )
+    return answer
+
+@app.on_event("shutdown")
+async def shutdown():
+    await webrtc_manager.close_all()
 ```
 
 ### ブラウザ側の実装例
 
 ```javascript
 // WebRTC接続
-const pc = new RTCPeerConnection();
+const pc = new RTCPeerConnection({
+    iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+});
 
 // ビデオストリーム受信
 pc.ontrack = (event) => {
@@ -54,50 +64,104 @@ pc.ontrack = (event) => {
     video.srcObject = event.streams[0];
 };
 
+// 受信専用トランシーバーを追加
+pc.addTransceiver("video", { direction: "recvonly" });
+
 // Offer作成
 const offer = await pc.createOffer();
 await pc.setLocalDescription(offer);
 
 // サーバーにOffer送信
-const response = await fetch('/offer', {
+const response = await fetch('/api/webrtc/offer', {
     method: 'POST',
-    headers: {'Content-Type': 'application/json'},
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
         sdp: pc.localDescription.sdp,
         type: pc.localDescription.type
     })
 });
 
-// Answer受信
+// Answer受信して設定
 const answer = await response.json();
-await pc.setRemoteDescription(answer);
+await pc.setRemoteDescription(new RTCSessionDescription(answer));
 ```
 
 ## API リファレンス
 
-### WebRTCHandler クラス
+### WebRTCManager クラス
+
+#### コンストラクタ
+
+##### `__init__(camera_manager: CameraManager)`
+WebRTCマネージャーを初期化します。
+
+**引数**:
+- `camera_manager`: CameraManagerインスタンス（フレーム取得元）
 
 #### メソッド
 
-##### `create_peer_connection(camera_manager: CameraManager) -> RTCPeerConnection`
-WebRTC Peer Connectionを作成します。
+##### `async create_offer(sdp: str, type: str) -> dict`
+クライアントからのOfferを処理し、Answerを生成します。
+
+**引数**:
+- `sdp`: Session Description Protocol文字列
+- `type`: SDPタイプ（"offer"）
+
+**戻り値**:
+- `dict`: `{"sdp": str, "type": "answer"}`
+
+##### `async close_peer_connection(pc: RTCPeerConnection) -> None`
+特定のPeerConnectionを閉じます。
+
+##### `async close_all() -> None`
+すべてのPeerConnectionを閉じます。アプリケーション終了時に呼び出します。
+
+### VideoTrack クラス
+
+カメラ映像をWebRTC VideoTrackとして提供するカスタムトラック。
+
+#### コンストラクタ
+
+##### `__init__(camera_manager: CameraManager)`
+VideoTrackを初期化します。
 
 **引数**:
 - `camera_manager`: CameraManagerインスタンス
 
-**戻り値**:
-- `RTCPeerConnection`: aiortcのPeerConnectionオブジェクト
+#### メソッド
+
+##### `async recv() -> VideoFrame`
+次のビデオフレームを取得します。
 
 **動作**:
-1. RTCPeerConnectionインスタンス作成
-2. カメラからビデオトラック作成
-3. トラックをPeerConnectionに追加
+1. CameraManagerから最新フレームを取得
+2. BGR → RGB変換
+3. aiortc VideoFrameに変換
+4. タイムスタンプ付与
 
-### VideoStreamTrack クラス
+**戻り値**:
+- `VideoFrame`: aiortcのビデオフレームオブジェクト
 
-カメラ映像をWebRTC VideoTrackとして提供するカスタムトラック。
+## 接続状態の監視
 
-##### `__init__(camera_manager: CameraManager)`
+WebRTCManagerは接続状態の変化を自動的に監視します:
+
+| 状態 | 説明 |
+|------|------|
+| `new` | 接続開始 |
+| `connecting` | 接続中 |
+| `connected` | 接続完了 |
+| `disconnected` | 一時切断 |
+| `failed` | 接続失敗 |
+| `closed` | 接続終了 |
+
+`failed` または `closed` 状態になると、PeerConnectionは自動的にクリーンアップされます。
+
+## 注意事項
+
+- STUNサーバーにはGoogleの公開サーバー (`stun:stun.l.google.com:19302`) を使用
+- ローカルネットワーク内では直接P2P接続が確立される
+- NATを超える場合はTURNサーバーの設定が必要な場合がある
 ビデオストリームトラックを初期化します。
 
 ##### `async recv() -> av.VideoFrame`

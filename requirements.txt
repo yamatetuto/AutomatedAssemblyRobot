@@ -8,6 +8,10 @@ numpy==1.24.3
 minimalmodbus==2.1.1
 pyserial==3.5
 
+# SPLEBO-Nロボット制御 (src/robot)
+spidev==3.6          # SPI通信 (MCP2515 CAN Controller)
+smbus2==0.4.3        # I2C通信 (I/O Expander)
+# RPi.GPIO はディスペンサー制御と共用
 
 # ディスペンサー制御
 RPi.GPIO==0.7.1
@@ -19,6 +23,7 @@ uvicorn[standard]==0.24.0
 websockets==12.0
 pydantic==2.5.0
 python-multipart==0.0.6
+jinja2==3.1.2        # テンプレートエンジン
 
 # 設定管理
 python-dotenv==1.0.0

@@ -9,7 +9,7 @@
 本プロジェクトは、以下のデバイスを統合制御し、医療機器の自動組立を実現するシステムです:
 
 - **3Dプリンター** (Tronxy GEMINI S) - OctoPrint経由で制御
-- **XYZ直交ロボット** (株式会社コスモスウェブ製) - 企業ライブラリで制御
+- **XYZ直交ロボット** (株式会社コスモスウェブ製 SPLEBO-N) - libcsms_splebo_n.so経由で制御
 - **電動グリッパー** (IAI社 RCP2-GRSS) - Modbus RTU通信
 - **ディスペンサー** - Raspberry Pi GPIO制御
 - **カメラ** (Logitech C922 Pro) - OpenCV + WebRTC
@@ -30,13 +30,17 @@
 - [x] **モジュール化アーキテクチャ** - 再利用可能なコンポーネント設計
 - [x] **Modbus排他制御** - asyncio.Lock()による通信の安定化
 - [x] **3Dプリンター制御** (OctoPrint API) - 状態監視、一時停止/再開(退避動作付)
+- [x] **SPLEBO-N XYZ直交ロボット制御** - asyncio対応、REST API、WebSocket状態配信
 
 ### 🚧 実装中
 - [ ] 電流値取得の安定化（Modbusタイムアウト対策）
 - [ ] ディスペンサー制御 (GPIO)
-- [ ] 画像処理・物体検出
-- [ ] ロボットアーム統合
 - [ ] 自動組立シーケンス
+
+### ✅ 画像処理（Vision）
+- [x] **光ファイバー検出** - Cannyエッジ + Hough変換による直線検出
+- [x] **ガラス玉検出** - Hough円変換による円形物体検出
+- [x] **オフセット計算** - 画像中心からの距離算出
 
 ---
 
@@ -48,36 +52,66 @@ AutomatedAssemblyRobot/
 ├── src/                       # モジュール化されたソースコード
 │   ├── camera/               # カメラ管理モジュール
 │   │   ├── __init__.py
-│   │   └── camera_manager.py
+│   │   ├── camera_manager.py # OpenCV + V4L2カメラ制御
+│   │   └── README.md
 │   ├── gripper/              # グリッパー管理モジュール
 │   │   ├── __init__.py
-│   │   ├── gripper_manager.py  # Modbusロック機構実装
-│   │   └── controller.py       # CONController (Modbus RTU)
+│   │   ├── gripper_manager.py  # 高レベルAPI（排他制御、キャッシュ）
+│   │   ├── controller.py       # CONController (Modbus RTU通信)
+│   │   └── README.md
+│   ├── robot/                # SPLEBO-N XYZ直交ロボット制御
+│   │   ├── __init__.py
+│   │   ├── robot_manager.py    # 統合管理クラス
+│   │   ├── motion_controller.py # モーション制御
+│   │   ├── can_controller.py   # CAN通信 (MCP2515)
+│   │   ├── io_expander.py      # I/O制御
+│   │   ├── position_manager.py # ティーチングポジション管理
+│   │   ├── sequence_manager.py # シーケンス実行
+│   │   ├── api.py              # REST APIエンドポイント
+│   │   ├── websocket_handler.py # WebSocket状態配信
+│   │   ├── constants.py        # 定数・Enum定義
+│   │   └── README.md
 │   ├── webrtc/               # WebRTC管理モジュール
 │   │   ├── __init__.py
-│   │   └── webrtc_manager.py
+│   │   ├── webrtc_manager.py   # aiortc WebRTC接続管理
+│   │   └── README.md
+│   ├── printer/              # 3Dプリンター管理モジュール
+│   │   ├── __init__.py
+│   │   ├── octoprint_client.py # OctoPrint REST APIクライアント
+│   │   ├── printer_manager.py  # 高レベルプリンター制御
+│   │   └── README.md
+│   ├── vision/               # 画像処理モジュール
+│   │   ├── __init__.py
+│   │   ├── manager.py          # VisionManager（検出統括）
+│   │   └── detectors/          # 検出器
+│   │       ├── __init__.py
+│   │       ├── base.py         # BaseDetector（抽象基底クラス）
+│   │       ├── fiber.py        # FiberDetector（光ファイバー検出）
+│   │       └── bead.py         # BeadDetector（ガラス玉検出）
 │   └── config/               # 設定管理モジュール
 │       ├── __init__.py
-│       └── settings.py
+│       └── settings.py         # 環境変数読み込み
+├── data/                      # データファイル
+│   └── robot/                 # ロボット設定・ポジションデータ
+│       ├── config.json        # 軸設定
+│       ├── positions.json     # ティーチングポイント
+│       └── sequences.json     # シーケンス定義
 ├── web_app/                   # Webアプリケーション
+│   ├── main_webrtc_fixed.py  # 旧メインファイル（参考用）
 │   ├── static/               # 静的ファイル
-│   │   ├── css/             # スタイルシート
+│   │   ├── css/             
 │   │   │   └── style.css    # メインCSS
-│   │   └── js/              # JavaScript
+│   │   └── js/              
 │   │       └── app.js       # UIロジック（電流値グラフ、把持判定等）
 │   └── templates/            # HTMLテンプレート
 │       └── index_webrtc_fixed.html
+├── scripts/                   # 運用スクリプト
+│   ├── start_all.sh          # 全サービス起動（旧マイクロサービス用）
+│   ├── stop_all.sh           # 全サービス停止
+│   └── health_check.sh       # ヘルスチェック
 ├── snapshots/                 # スナップショット保存先
-├── docs/                      # ドキュメント
-│   ├── reports/              # 調査レポート
-│   ├── requirements.md       # 要件定義
-│   ├── schema.md             # データ構造定義
-│   └── device_specifications.md
-├── backup/                    # バックアップ
-│   ├── old_code/             # 旧コード
-│   ├── services_backup/      # 旧マイクロサービス実装
-│   └── docs_microservices/   # マイクロサービス設計ドキュメント
 ├── requirements.txt           # Python依存パッケージ
+├── setup.py                   # パッケージ設定
 └── README.md                  # このファイル
 ```
 
@@ -249,6 +283,43 @@ pkill -f "python.*app.py"
 |---------|---------------|------|
 | POST | `/api/webrtc/offer` | WebRTC接続確立 |
 
+### 3Dプリンター API
+
+| メソッド | エンドポイント | 説明 |
+|---------|---------------|------|
+| GET | `/api/printer/status` | プリンター状態取得 |
+| POST | `/api/printer/pause` | 一時停止（退避動作付） |
+| POST | `/api/printer/resume` | 再開（位置復帰付） |
+| GET | `/api/printer/files` | ファイル一覧取得 |
+
+### 画像処理 API
+
+| メソッド | エンドポイント | 説明 |
+|---------|---------------|------|
+| POST | `/api/vision/fiber` | 光ファイバー検出 |
+| POST | `/api/vision/bead` | ガラス玉検出 |
+
+### XYZ直交ロボット API (SPLEBO-N)
+
+| メソッド | エンドポイント | 説明 |
+|---------|---------------|------|
+| GET | `/api/robot/status` | ロボット状態取得 |
+| GET | `/api/robot/positions` | 全軸位置取得 |
+| POST | `/api/robot/initialize` | ロボット初期化 |
+| POST | `/api/robot/shutdown` | シャットダウン |
+| POST | `/api/robot/home` | 原点復帰 |
+| POST | `/api/robot/move` | 軸移動 |
+| POST | `/api/robot/jog/start` | JOG移動開始 |
+| POST | `/api/robot/jog/stop` | JOG移動停止 |
+| POST | `/api/robot/stop` | 緊急停止 |
+| GET | `/api/robot/teaching/positions` | ティーチングポイント一覧 |
+| POST | `/api/robot/teaching/teach` | 現在位置をティーチング |
+| POST | `/api/robot/teaching/move` | ティーチングポイントへ移動 |
+| DELETE | `/api/robot/teaching/positions/{name}` | ポイント削除 |
+| GET | `/api/robot/io/input/{port}` | 入力ポート読み取り |
+| POST | `/api/robot/io/output` | 出力ポート設定 |
+| WS | `/ws/robot` | リアルタイム状態配信 (WebSocket) |
+
 ---
 
 ## ⚙️ 設定
@@ -263,6 +334,26 @@ export CAMERA_FPS=30
 export GRIPPER_PORT=/dev/ttyUSB0
 export GRIPPER_BAUDRATE=38400
 export GRIPPER_SLAVE_ADDR=1
+
+# 3Dプリンター設定
+export OCTOPRINT_URL=http://127.0.0.1:5000
+export OCTOPRINT_API_KEY=your_api_key_here
+export OCTOPRINT_POLL_INTERVAL=5.0
+
+# 画像処理設定
+export VISION_FIBER_CANNY_THRESHOLD1=50
+export VISION_FIBER_CANNY_THRESHOLD2=150
+export VISION_BEAD_MIN_DIST=20
+export VISION_BEAD_PARAM2=30
+
+# XYZ直交ロボット設定 (SPLEBO-N)
+export ROBOT_SIMULATION_MODE=true     # シミュレーションモード（開発用）
+export ROBOT_CAN_SPI_BUS=0            # SPI バス番号
+export ROBOT_CAN_SPI_DEVICE=0         # SPI デバイス番号
+export ROBOT_GPIO_NOVA_RESET=14       # NOVAリセットピン
+export ROBOT_GPIO_POWER=12            # 電源ピン
+export ROBOT_GPIO_CAN_CS=8            # CAN CSピン
+export ROBOT_GPIO_EMG_SW=15           # 非常停止スイッチピン
 ```
 
 ---
@@ -447,6 +538,23 @@ class GripperManager:
 
 ## 📝 更新履歴
 
+### v3.0 (2026-01-07)
+- **SPLEBO-N XYZ直交ロボット制御モジュール追加**
+  - `src/robot/` モジュール新規作成
+  - asyncio対応の非同期モーション制御
+  - REST API エンドポイント20種類以上
+  - WebSocketリアルタイム状態配信（100ms間隔）
+  - シミュレーションモード対応（開発PC用）
+  - ティーチングポジション管理（JSON形式）
+  - シーケンス実行エンジン（ポイント移動、カスタムシーケンス）
+- **ロボット制御API**
+  - `/api/robot/` 配下にRESTエンドポイント追加
+  - `/ws/robot` WebSocketエンドポイント追加
+- **依存関係追加**
+  - spidev==3.6 (SPI通信)
+  - smbus2==0.4.3 (I2C通信)
+  - jinja2==3.1.2 (テンプレート)
+
 ### v2.2 (2025-11-09)
 - **電流値モニタリング機能追加**
   - リアルタイム電流値取得API (`/api/gripper/current`)
@@ -518,8 +626,8 @@ class GripperManager:
 
 ---
 
-**開発状況**: 🟡 ベータ版（v2.2 - 一部機能調整中）  
-**最終更新**: 2025-11-09  
+**開発状況**: � 安定版（v3.0 - SPLEBO-Nロボット制御統合）  
+**最終更新**: 2026-01-07  
 **Repository**: https://github.com/yamatetuto/AutomatedAssemblyRobot
 
 ## 最新の更新 (2025-11-12)
