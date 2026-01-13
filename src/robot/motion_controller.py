@@ -190,6 +190,7 @@ class AxisConfig:
     origin_offset: float = 0.0
     offset_speed: float = 10.0
     origin_sensor: int = 0  # 0: OFF, 1: ON, 2: AUTO
+    origin_order: int = 1   # 原点復帰順序 (大きい値が先に実行)
 
 
 @dataclass
@@ -519,8 +520,9 @@ class I2CIOExpander:
     OLATA = 0x14
     OLATB = 0x15
     
-    def __init__(self, config: Optional[IOExpanderConfig] = None):
+    def __init__(self, config: Optional[IOExpanderConfig] = None, simulation_mode: bool = False):
         self.config = config or IOExpanderConfig()
+        self._simulation_mode = simulation_mode
         self._smbus: Optional[Any] = None
         self._initialized = False
         self._read_data: List[int] = [0] * self.config.board_count
@@ -529,8 +531,8 @@ class I2CIOExpander:
     
     async def initialize(self) -> bool:
         """I/Oエキスパンダを初期化"""
-        if not HAS_SMBUS:
-            logger.warning("smbus not available - I/O expander will be simulated")
+        if self._simulation_mode or not HAS_SMBUS:
+            logger.warning("I/O expander running in simulation mode")
             self._initialized = True
             return True
         
@@ -671,7 +673,7 @@ class MotionController:
         
         # Components
         self._native_lib = NativeLibrary(library_path)
-        self._io_expander = I2CIOExpander()
+        self._io_expander = I2CIOExpander(simulation_mode=simulation_mode)
         
         # State
         self._state = ControllerState.UNINITIALIZED
@@ -1004,6 +1006,14 @@ class MotionController:
         
         self._state = ControllerState.MOVING
         
+        # シミュレーションモードでは即座に成功を返す
+        if self.simulation_mode:
+            logger.debug(f"[Simulation] Move absolute: axis={axis}, pos={position_mm}mm, speed={speed_percent}%")
+            self._axis_status[axis].current_position = target_pulse
+            self._axis_status[axis].is_moving = False
+            self._state = ControllerState.READY
+            return True
+        
         async with self._lock:
             result = await asyncio.to_thread(
                 self._native_lib.move_absolute, axis, target_pulse, speed_pulse)
@@ -1040,6 +1050,15 @@ class MotionController:
         speed_pulse = self._speed_percent_to_pulse(axis, speed_percent)
         
         self._state = ControllerState.MOVING
+        
+        # シミュレーションモードでは即座に成功を返す
+        if self.simulation_mode:
+            logger.debug(f"[Simulation] Move relative: axis={axis}, dist={distance_mm}mm")
+            current = self._axis_status[axis].current_position
+            self._axis_status[axis].current_position = current + distance_pulse
+            self._axis_status[axis].is_moving = False
+            self._state = ControllerState.READY
+            return True
         
         async with self._lock:
             result = await asyncio.to_thread(
@@ -1142,6 +1161,11 @@ class MotionController:
         Returns:
             完了した場合True、タイムアウトの場合False
         """
+        # シミュレーションモードでは即座に完了
+        if self.simulation_mode:
+            self._state = ControllerState.READY
+            return True
+        
         start_time = asyncio.get_event_loop().time()
         
         while (asyncio.get_event_loop().time() - start_time) < timeout:

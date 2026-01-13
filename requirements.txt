@@ -1,40 +1,49 @@
-# カメラ・映像処理
-opencv-python==4.8.1.78
-aiortc==1.6.0
-aiohttp==3.9.1
-numpy==1.24.3
+# =============================================================================
+# AutomatedAssemblyRobot 依存パッケージ
+# =============================================================================
+# 
+# ■ インストール手順
+# 
+# 1. aptでインストール可能なパッケージを先にインストール:
+#    sudo apt install -y python3-opencv python3-numpy python3-aiohttp \
+#        python3-websockets python3-jinja2 python3-yaml python3-dotenv \
+#        python3-serial python3-spidev python3-smbus python3-rpi.gpio \
+#        python3-fastapi python3-uvicorn python3-pydantic python3-av \
+#        python3-multipart python3-pytest python3-flake8 python3-mypy
+#
+# 2. aptでインストールできないパッケージをpipでインストール:
+#    pip3 install --break-system-packages aiortc minimalmodbus pytest-asyncio pytest-cov
+#
+# =============================================================================
 
-# グリッパー制御
-minimalmodbus==2.1.1
-pyserial==3.5
+# ----- pip専用パッケージ (aptで利用不可) -----
 
-# SPLEBO-Nロボット制御 (src/robot)
-spidev==3.6          # SPI通信 (MCP2515 CAN Controller)
-smbus2==0.4.3        # I2C通信 (I/O Expander)
-# RPi.GPIO はディスペンサー制御と共用
+# WebRTC (カメラストリーミング)
+aiortc>=1.6.0
+# Python3.9.x
+# aiortc>=1.5.0
 
-# ディスペンサー制御
-RPi.GPIO==0.7.1
-# または gpiozero==2.0.1
+# Modbus通信 (グリッパー制御)
+minimalmodbus>=2.1.1
 
-# Webアプリケーション
-fastapi==0.104.1
-uvicorn[standard]==0.24.0
-websockets==12.0
-pydantic==2.5.0
-python-multipart==0.0.6
-jinja2==3.1.2        # テンプレートエンジン
+# テスト追加パッケージ
+pytest-asyncio>=0.21.1
+pytest-cov>=4.1.0
 
-# 設定管理
-python-dotenv==1.0.0
-PyYAML==6.0.1
-
-# テスト
-pytest==7.4.3
-pytest-asyncio==0.21.1
-pytest-cov==4.1.0
-
-# 開発ツール
-black==23.11.0
-flake8==6.1.0
-mypy==1.7.0
+# ----- 以下はaptでインストール推奨 (参考情報) -----
+# 
+# ■ カメラ・映像処理
+#   apt: python3-opencv python3-numpy python3-aiohttp python3-av
+#
+# ■ ハードウェア通信
+#   apt: python3-serial python3-spidev python3-smbus python3-rpi.gpio
+#
+# ■ Webアプリケーション
+#   apt: python3-fastapi python3-uvicorn python3-pydantic 
+#        python3-multipart python3-jinja2 python3-websockets
+#
+# ■ 設定管理
+#   apt: python3-yaml python3-dotenv
+#
+# ■ テスト・開発ツール
+#   apt: python3-pytest python3-flake8 python3-mypy

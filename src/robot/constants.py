@@ -209,6 +209,7 @@ class InputPort(IntEnum):
     WORK_ENABLE = 12        # ワーク有無
     START_LEFT_SW = 13      # 左スタートSW
     START_RIGHT_SW = 14     # 右スタートSW
+    EMG_SW = 15             # 非常停止スイッチ
 
 
 class NOVARegister:
@@ -299,11 +300,13 @@ class RobotState(Enum):
     """ロボット状態"""
     DISCONNECTED = "disconnected"
     INITIALIZING = "initializing"
+    IDLE = "idle"
     READY = "ready"
     HOMING = "homing"
     MOVING = "moving"
     ERROR = "error"
     EMERGENCY = "emergency"
+    SHUTDOWN = "shutdown"
 
 
 class ErrorCode(Enum):

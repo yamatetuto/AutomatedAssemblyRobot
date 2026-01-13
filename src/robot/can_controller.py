@@ -64,6 +64,7 @@ class CANController:
         spi_device: int = None,
         spi_speed_hz: int = None,
         gpio_cs_pin: int = None,
+        simulation_mode: bool = False,
     ):
         """
         初期化
@@ -73,6 +74,7 @@ class CANController:
             spi_device: SPIデバイス番号
             spi_speed_hz: SPI通信速度
             gpio_cs_pin: チップセレクトGPIOピン
+            simulation_mode: シミュレーションモード
         """
         # 設定読み込み
         from src.config.settings import (
@@ -80,6 +82,7 @@ class CANController:
             ROBOT_CAN_SPEED_HZ, ROBOT_GPIO_CAN_CS
         )
         
+        self.simulation_mode = simulation_mode
         self.spi_bus = spi_bus if spi_bus is not None else ROBOT_CAN_SPI_BUS
         self.spi_device = spi_device if spi_device is not None else ROBOT_CAN_SPI_DEVICE
         self.spi_speed_hz = spi_speed_hz if spi_speed_hz is not None else ROBOT_CAN_SPEED_HZ
@@ -107,7 +110,9 @@ class CANController:
         
         # 状態
         self.is_initialized = False
-        self._simulation_mode = not HAS_HARDWARE
+        # simulation_modeが明示的に指定されていればそれを使用、
+        # そうでなければハードウェア有無で判定
+        self._simulation_mode = simulation_mode or not HAS_HARDWARE
     
     async def initialize(self) -> bool:
         """

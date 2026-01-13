@@ -73,6 +73,7 @@ import asyncio
 import logging
 from dataclasses import dataclass, field
 from enum import IntEnum
+import os
 from typing import Optional, Dict, List, Callable, Any, Tuple
 from pathlib import Path
 import json
@@ -121,7 +122,9 @@ class SafetyState(IntEnum):
 class RobotConfig:
     """ロボット設定"""
     # Library path
-    motion_lib_path: str = "./libcsms_splebo_n.so"
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    motion_lib_path: str = os.path.join(current_dir, "libcsms_splebo_n.so")
+    # motion_lib_path: str = "./libcsms_splebo_n.so"
     
     # CAN settings
     can_spi_bus: int = 0
@@ -343,7 +346,7 @@ class RobotManager:
             self.can = CANController(
                 spi_bus=self.config.can_spi_bus,
                 spi_device=self.config.can_spi_device,
-                cs_pin=self.config.can_cs_pin,
+                gpio_cs_pin=self.config.can_cs_pin,
                 simulation_mode=self.config.simulation_mode
             )
             
@@ -355,7 +358,7 @@ class RobotManager:
                 return False
             
             # Initialize I/O expander
-            self.io = IOExpander(self.can)
+            self.io = IOExpander(self.can, simulation_mode=self.config.simulation_mode)
             
             # Initialize position manager
             position_path = Path(self.config.data_dir) / self.config.position_file
@@ -401,13 +404,20 @@ class RobotManager:
                     axis = axis_data.get('axis', 0)
                     self._axis_configs[axis] = AxisConfig(
                         motor_type=MotorType(axis_data.get('motor_type', 0)),
-                        max_speed=axis_data.get('max_speed', 1000),
-                        start_speed=axis_data.get('start_speed', 100),
-                        max_accel=axis_data.get('max_accel', 500),
-                        max_decel=axis_data.get('max_decel', 500),
+                        max_speed=axis_data.get('max_speed', 800),
+                        start_speed=axis_data.get('start_speed', 200),
+                        max_accel=axis_data.get('max_accel', 2940),
+                        max_decel=axis_data.get('max_decel', 2940),
                         pulse_length=axis_data.get('pulse_length', 0.01),
-                        limit_minus=axis_data.get('limit_minus', 0.0),
-                        limit_plus=axis_data.get('limit_plus', 500.0),
+                        limit_minus=axis_data.get('limit_minus', -0.5),
+                        limit_plus=axis_data.get('limit_plus', 800.5),
+                        in_position=axis_data.get('in_position', 1),
+                        origin_speed=axis_data.get('origin_speed', 10.0),
+                        origin_dir=axis_data.get('origin_dir', 0),
+                        origin_offset=axis_data.get('origin_offset', 0.0),
+                        offset_speed=axis_data.get('offset_speed', 10.0),
+                        origin_sensor=axis_data.get('origin_sensor', 0),
+                        origin_order=axis_data.get('origin_order', 2),
                     )
                     
                 logger.info(f"Loaded axis configurations from {config_path}")
@@ -1021,7 +1031,7 @@ class RobotManager:
         
         # Stop CAN
         if self.can:
-            await self.can.shutdown()
+            await self.can.close()
         
         # Save positions
         if self.positions:

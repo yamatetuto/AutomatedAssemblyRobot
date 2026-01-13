@@ -147,7 +147,7 @@ AutomatedAssemblyRobot/
 sudo apt update && sudo apt upgrade -y
 
 # 必須ツールのインストール
-sudo apt install -y git python3-pip python3-opencv v4l-utils
+sudo apt install -y git v4l-utils
 ```
 
 ### 2. リポジトリのクローン
@@ -158,15 +158,37 @@ cd AutomatedAssemblyRobot
 ```
 
 ### 3. Python依存パッケージのインストール
-```bash
-# システムワイドインストール（推奨）
-pip3 install --break-system-packages fastapi uvicorn minimalmodbus aiortc jinja2 python-multipart av
 
-# または仮想環境を使用
-python3 -m venv venv
-source venv/bin/activate
-pip3 install fastapi uvicorn minimalmodbus aiortc jinja2 python-multipart av
+#### Step 1: aptでインストール（推奨）
+```bash
+# Webアプリケーション
+sudo apt install -y python3-fastapi python3-uvicorn python3-pydantic python3-multipart python3-jinja2 python3-websockets
+
+# カメラ・映像処理
+sudo apt install -y python3-opencv python3-numpy python3-aiohttp python3-av
+
+# ハードウェア通信 (Raspberry Pi)
+sudo apt install -y python3-serial python3-spidev python3-smbus python3-rpi.gpio
+
+# 設定管理
+sudo apt install -y python3-yaml python3-dotenv
+
+# テスト・開発ツール（オプション）
+sudo apt install -y python3-pytest python3-flake8 python3-mypy
 ```
+
+#### Step 2: pipでインストール（aptで利用不可のパッケージ）
+```bash
+# aiortc: WebRTC (カメラストリーミング)
+# minimalmodbus: Modbus通信 (グリッパー制御)
+pip3 install --break-system-packages aiortc minimalmodbus
+
+# テスト追加パッケージ（オプション）
+pip3 install --break-system-packages pytest-asyncio pytest-cov
+```
+
+> **Note**: `--break-system-packages` オプションはRaspberry Pi OS (Bookworm以降)で
+> システムワイドにpipパッケージをインストールする際に必要です。
 
 ### 4. デバイス接続確認
 ```bash

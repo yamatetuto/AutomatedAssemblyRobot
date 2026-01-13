@@ -46,14 +46,16 @@ class IOExpander:
     # I/Oボード設定
     IO_BOARD_ID = 0  # 主要I/Oボード
     
-    def __init__(self, can_controller: CANController):
+    def __init__(self, can_controller: CANController, simulation_mode: bool = False):
         """
         初期化
         
         Args:
             can_controller: CANコントローラインスタンス
+            simulation_mode: シミュレーションモード
         """
         self.can = can_controller
+        self._simulation_mode = simulation_mode or (can_controller and can_controller._simulation_mode)
         self._output_cache: Dict[int, bool] = {}
         self._input_cache: Dict[int, bool] = {}
         self._lock = asyncio.Lock()
@@ -68,6 +70,9 @@ class IOExpander:
         Returns:
             ポート状態 (True=ON, False=OFF)
         """
+        if self._simulation_mode:
+            # シミュレーション: キャッシュ値を返す（デフォルトFalse）
+            return self._input_cache.get(port, False)
         return self.can.get_input_bit(self.IO_BOARD_ID, port)
     
     async def set_output(self, port: int, value: bool) -> None:
@@ -81,7 +86,10 @@ class IOExpander:
         async with self._lock:
             # OutputPortは100番台、実際のビット位置に変換
             bit = port - 100 if port >= 100 else port
-            self.can.set_output_bit(self.IO_BOARD_ID, bit, value)
+            
+            if not self._simulation_mode:
+                self.can.set_output_bit(self.IO_BOARD_ID, bit, value)
+            
             self._output_cache[port] = value
             
             logger.debug(f"Output port {port} set to {value}")
@@ -260,6 +268,15 @@ class IOExpander:
     async def has_work(self) -> bool:
         """ワーク有無確認"""
         return await self.get_input(InputPort.WORK_ENABLE.value)
+    
+    async def is_emergency_active(self) -> bool:
+        """
+        非常停止スイッチ状態確認
+        
+        Returns:
+            True: 非常停止中, False: 正常
+        """
+        return await self.get_input(InputPort.EMG_SW.value)
     
     async def is_torque_up(self) -> bool:
         """トルクアップ確認"""
