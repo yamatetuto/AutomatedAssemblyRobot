@@ -85,7 +85,7 @@ from .constants import (
 )
 from .motion_controller import (
     MotionController, MotorType, AxisConfig, AxisStatus,
-    ControllerState
+    ControllerState, load_axis_configs_from_sys_file
 )
 from .can_controller import CANController
 from .io_expander import IOExpander
@@ -392,7 +392,37 @@ class RobotManager:
             return False
     
     async def _load_axis_configs(self) -> None:
-        """軸設定をロード"""
+        """軸設定をロード
+        
+        優先順位:
+        1. SPLEBO-N.sys (TEACHINGの設定ファイル)
+        2. config.json (このプロジェクトのJSON設定ファイル)
+        3. デフォルト設定
+        """
+        # まずSPLEBO-N.sysを試す
+        sys_file_paths = [
+            "/home/splebopi/SPLEBO/TEACHING/SPLEBO-N.sys",
+            Path(self.config.data_dir) / "SPLEBO-N.sys",
+        ]
+        
+        for sys_path in sys_file_paths:
+            sys_path = Path(sys_path)
+            if sys_path.exists():
+                try:
+                    configs = load_axis_configs_from_sys_file(str(sys_path))
+                    if configs:
+                        self._axis_configs = configs
+                        logger.info(f"Loaded axis configs from {sys_path}")
+                        
+                        # MotionControllerにも設定を適用
+                        if self.motion:
+                            for axis, config in configs.items():
+                                self.motion.set_axis_config(axis, config)
+                        return
+                except Exception as e:
+                    logger.warning(f"Failed to load {sys_path}: {e}")
+        
+        # JSONファイルから読み込み
         config_path = Path(self.config.data_dir) / self.config.config_file
         
         if config_path.exists():

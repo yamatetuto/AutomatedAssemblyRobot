@@ -450,6 +450,96 @@ class IOExpanderConfig:
     board_bits: int = 16
 
 
+def load_axis_configs_from_sys_file(sys_file_path: str) -> Dict[int, AxisConfig]:
+    """SPLEBO-N.sysファイルから軸設定を読み込む
+    
+    Args:
+        sys_file_path: SPLEBO-N.sysファイルのパス
+        
+    Returns:
+        軸番号をキーとしたAxisConfig辞書
+    """
+    import configparser
+    import os
+    
+    configs = {}
+    
+    if not os.path.exists(sys_file_path):
+        logger.warning(f"設定ファイルが見つかりません: {sys_file_path}")
+        return configs
+    
+    parser = configparser.ConfigParser()
+    parser.read(sys_file_path)
+    
+    if 'SysParam' not in parser:
+        logger.warning("SysParamセクションが見つかりません")
+        return configs
+    
+    def get_list(key: str, default: List = None) -> List[str]:
+        if key in parser['SysParam']:
+            return parser['SysParam'][key].split(',')
+        return default or []
+    
+    # 各パラメータを読み込み
+    motor_types = get_list('MotorType', ['0']*8)
+    max_speeds = get_list('MaxSpeed', ['1000']*8)
+    start_speeds = get_list('StartSpeed', ['100']*8)
+    max_accels = get_list('MaxAccel', ['500']*8)
+    max_decels = get_list('MaxDecel', ['500']*8)
+    pulse_lengths = get_list('PulseLength', ['0.01']*8)
+    limit_pluses = get_list('LimitPlus', ['500']*8)
+    limit_minuses = get_list('LimitMinus', ['0']*8)
+    origin_speeds = get_list('OriginSpeed', ['10']*8)
+    origin_dirs = get_list('OriginDir', ['0']*8)
+    origin_offsets = get_list('OriginOffset', ['0']*8)
+    origin_sensors = get_list('OriginSensor', ['0']*8)
+    origin_orders = get_list('OriginOrder', ['1']*8)
+    in_positions = get_list('InPosition', ['1']*8)
+    offset_speeds = get_list('OffsetSpeed', ['10']*8)
+    
+    # 軸ごとにAxisConfigを作成
+    for i in range(min(8, len(motor_types))):
+        try:
+            motor_type_val = int(motor_types[i].strip())
+            if motor_type_val == 0:
+                motor_type = MotorType.NONE
+            elif motor_type_val == 1:
+                motor_type = MotorType.IAI
+            elif motor_type_val == 2:
+                motor_type = MotorType.STEPPING
+            elif motor_type_val == 3:
+                motor_type = MotorType.ASTEP
+            else:
+                motor_type = MotorType.NONE
+            
+            configs[i] = AxisConfig(
+                motor_type=motor_type,
+                max_speed=int(max_speeds[i].strip()) if i < len(max_speeds) else 1000,
+                start_speed=int(start_speeds[i].strip()) if i < len(start_speeds) else 100,
+                max_accel=int(max_accels[i].strip()) if i < len(max_accels) else 500,
+                max_decel=int(max_decels[i].strip()) if i < len(max_decels) else 500,
+                pulse_length=float(pulse_lengths[i].strip()) if i < len(pulse_lengths) else 0.01,
+                limit_plus=float(limit_pluses[i].strip()) if i < len(limit_pluses) else 500.0,
+                limit_minus=float(limit_minuses[i].strip()) if i < len(limit_minuses) else 0.0,
+                origin_speed=float(origin_speeds[i].strip()) if i < len(origin_speeds) else 10.0,
+                origin_dir=int(origin_dirs[i].strip()) if i < len(origin_dirs) else 0,
+                origin_offset=float(origin_offsets[i].strip()) if i < len(origin_offsets) else 0.0,
+                origin_sensor=int(origin_sensors[i].strip()) if i < len(origin_sensors) else 0,
+                origin_order=int(origin_orders[i].strip()) if i < len(origin_orders) else 1,
+                in_position=int(in_positions[i].strip()) if i < len(in_positions) else 1,
+                offset_speed=float(offset_speeds[i].strip()) if i < len(offset_speeds) else 10.0,
+            )
+            
+            if motor_type != MotorType.NONE:
+                logger.info(f"軸{i}設定読み込み: type={motor_type.name}, origin_sensor={configs[i].origin_sensor}")
+                
+        except (ValueError, IndexError) as e:
+            logger.warning(f"軸{i}設定読み込みエラー: {e}")
+            configs[i] = AxisConfig()
+    
+    return configs
+
+
 # =============================================================================
 # Native Library Interface
 # =============================================================================
@@ -673,6 +763,35 @@ class NativeLibrary:
         if not self._lib:
             return False
         return bool(self._lib.cw_mc_set_dec(axis, decel, lock))
+    
+    def set_origin_mode(self, axis: int, h1m: int, h2m: int, lock: bool = False) -> bool:
+        """原点復帰モードを設定
+        
+        参照: TEACHING/motion_control.py L1713 - cmd_set_ret_origin_mode
+        
+        Args:
+            axis: 軸番号
+            h1m: 第1ホーミングモード
+            h2m: 第2ホーミングモード
+            lock: ロックフラグ
+        """
+        if not self._lib:
+            return False
+        return bool(self._lib.cw_mc_set_org_mode(axis, h1m, h2m, lock))
+    
+    def auto_origin(self, axis: int, hv: int, dv: int) -> bool:
+        """オートオリジン（原点復帰）を実行
+        
+        参照: TEACHING/motion_control.py L1751 - cmd_auto_origin
+        
+        Args:
+            axis: 軸番号
+            hv: ホーミング速度
+            dv: ドライブ速度
+        """
+        if not self._lib:
+            return False
+        return bool(self._lib.cw_mc_org(axis, hv, dv))
     
     def set_soft_limit(self, axis: int, limit_minus: int, limit_plus: int) -> bool:
         """ソフトリミットを設定"""
@@ -1142,6 +1261,19 @@ class MotionController:
         await asyncio.to_thread(
             self._native_lib.set_logical_coordinate, axis, 0)
         
+        # Reset actuator (clear errors)
+        # 参照: TEACHING/motion_control.py L399-401
+        await self._write_axis_io(axis, AxisIO.OUT1, True)   # Reset ON
+        await asyncio.sleep(0.1)
+        await self._write_axis_io(axis, AxisIO.OUT1, False)  # Reset OFF
+        await asyncio.sleep(0.1)
+        
+        # Servo ON
+        # 参照: TEACHING/motion_control.py L403
+        await self._write_axis_io(axis, AxisIO.OUT0, True)
+        await asyncio.sleep(0.5)  # Wait for servo to stabilize
+        self._axis_status[axis].is_servo_on = True
+        
         logger.debug(f"Axis {axis} configured: motor_type={config.motor_type.name}")
     
     def _setup_motor_functions(self, axis: int, motor_type: MotorType) -> None:
@@ -1200,7 +1332,11 @@ class MotionController:
         logger.info("Motion control loop stopped")
     
     async def _update_axis_status(self, axis: int) -> None:
-        """軸ステータスを更新"""
+        """軸ステータスを更新
+        
+        参照: TEACHING/motion_control.py L1095-1240 read_axis_io()
+        レジスタRR0からBusyビット、RR2からAlarm/EMG、RR3からInPositionを読み取る
+        """
         if self.simulation_mode:
             return
         
@@ -1213,17 +1349,42 @@ class MotionController:
                 self._axis_status[axis].abs_coord = round(
                     coord * config.pulse_length, 2)
             
-            # Get axis status using cw_mc_get_sts
-            # sts_no=0 で基本的なステータスを取得
-            sts_data = await asyncio.to_thread(
-                self._native_lib.get_axis_status, axis, 0)
-            if sts_data is not None:
+            # Read Register RR0 for busy/error status
+            # 参照: TEACHING/motion_control.py L1106-1132
+            reg0 = await asyncio.to_thread(
+                self._native_lib.read_register, axis, NOVARegister.RR0)
+            if reg0 is not None:
                 status = self._axis_status[axis]
-                # Parse status bits from cw_mc_get_sts
-                # Bit 0: Busy, Bit 1: Alarm, Bit 2: In-position
-                status.is_busy = bool(sts_data & 0x01)
-                status.is_alarm = bool(sts_data & 0x02)
-                status.is_in_position = bool(sts_data & 0x04)
+                # 軸ごとに異なるビット位置
+                # 軸0(X): bit0, 軸1(Y): bit1, 軸2(Z): bit2, 軸3(U): bit3
+                drv_bits = [NOVARegister.RR0_XDRV, NOVARegister.RR0_YDRV, 
+                           NOVARegister.RR0_ZDRV, NOVARegister.RR0_UDRV]
+                err_bits = [NOVARegister.RR0_XERR, NOVARegister.RR0_YERR,
+                           NOVARegister.RR0_ZERR, NOVARegister.RR0_UERR]
+                
+                if axis < len(drv_bits):
+                    status.is_busy = bool(reg0 & drv_bits[axis])
+                    is_error = bool(reg0 & err_bits[axis])
+                    if is_error:
+                        status.is_alarm = True
+            
+            # Read Register RR2 for alarm/emergency
+            reg2 = await asyncio.to_thread(
+                self._native_lib.read_register, axis, NOVARegister.RR2)
+            if reg2 is not None:
+                status = self._axis_status[axis]
+                # bit 10: Alarm, bit 20: Emergency
+                status.is_alarm = status.is_alarm or bool(reg2 & (1 << 10))
+                status.is_emergency = bool(reg2 & (1 << 20))
+            
+            # Read Register RR3 for in-position
+            reg3 = await asyncio.to_thread(
+                self._native_lib.read_register, axis, NOVARegister.RR3)
+            if reg3 is not None:
+                status = self._axis_status[axis]
+                reg3_low = reg3 & 0xFFFF
+                status.is_in_position = bool(reg3_low & NOVARegister.RR3_INPOS)
+                status.is_origin_sensor = bool(reg3_low & NOVARegister.RR3_STOP1)
                 
         except Exception as e:
             logger.error(f"Failed to update axis {axis} status: {e}")
@@ -1528,7 +1689,19 @@ class MotionController:
             # Execute homing sequence
             await funcs['home_start'](axis)
             
-            # Wait for homing to complete
+            # ホーミング開始後、最初にBusyになるのを待つ (最大2秒)
+            busy_wait_start = asyncio.get_event_loop().time()
+            while (asyncio.get_event_loop().time() - busy_wait_start) < 2.0:
+                await self._update_axis_status(axis)
+                if self._axis_status[axis].is_busy:
+                    logger.debug(f"Axis {axis} is now busy (homing started)")
+                    break
+                await asyncio.sleep(0.05)
+            else:
+                # Busyにならなかった場合でも続行（既に完了の可能性）
+                logger.warning(f"Axis {axis} did not become busy, may have completed instantly")
+            
+            # Wait for homing to complete (Busyがfalseになるまで待つ)
             timeout = 60.0  # 60 second timeout
             start_time = asyncio.get_event_loop().time()
             
@@ -1604,8 +1777,84 @@ class MotionController:
     # =========================================================================
     
     async def _homing_start_step(self, axis: int) -> None:
-        """ステッピング原点復帰開始"""
-        pass  # No special start sequence
+        """ステッピング原点復帰開始
+        
+        参照: TEACHING/motion_control.py L1484-1489 homing_move_start_STEP
+        
+        注意: origin_sensor == 0 (OFF) の場合、物理的なホーミングは行わず、
+        パラメータ設定のみ行います。オートオリジン(cw_mc_org)は
+        origin_sensor == 2 (AUTO) の場合のみ使用されます。
+        """
+        config = self._axis_configs[axis]
+        
+        # origin_sensor == AUTO(2) の場合のみオートオリジンを実行
+        if config.origin_sensor == 2:  # AUTO
+            await self._nova_homing_start_step(axis)
+        else:
+            # パラメータ設定のみ（物理的なホーミングなし）
+            await self._homing_parameter_set(axis)
+            logger.info(f"Axis {axis}: OriginSensor=OFF, skipping physical homing")
+    
+    async def _nova_homing_start_step(self, axis: int) -> None:
+        """ステッピング NOVAオートホーミング開始
+        
+        参照: TEACHING/motion_control.py L1491-1540 nova_homing_move_start_STEP
+        origin_sensor == AUTO の場合のみ呼ばれる
+        """
+        config = self._axis_configs[axis]
+        
+        # 1. ドライブ速度を設定
+        origin_speed_pulse = self._mm_to_pulse(axis, config.origin_speed)
+        await asyncio.to_thread(
+            self._native_lib.set_drive_speed, axis, origin_speed_pulse, False)
+        
+        # 2. ソフトリミット解除（ホーミング中は0に設定）
+        await asyncio.to_thread(
+            self._native_lib.set_soft_limit, axis, 0, 0)
+        
+        # 3. オートホーミングモードを設定
+        # origin_dir == 0 → orgn_dir = 0x02 (CW方向)
+        # origin_dir == 1 → orgn_dir = 0x00 (CCW方向)
+        orgn_dir = 0x02 if config.origin_dir == 0 else 0x00
+        h1m = 0x315 | orgn_dir
+        h2m = 0x686
+        await asyncio.to_thread(
+            self._native_lib.set_origin_mode, axis, h1m, h2m, False)
+        
+        # 4. オートオリジンコマンド発行
+        hv = origin_speed_pulse - 1
+        dv = origin_speed_pulse
+        result = await asyncio.to_thread(
+            self._native_lib.auto_origin, axis, hv, dv)
+        
+        if not result:
+            logger.error(f"STEP auto origin failed: axis={axis}")
+    
+    async def _homing_parameter_set(self, axis: int) -> None:
+        """ホーミングパラメータ設定
+        
+        参照: TEACHING/motion_control.py L1315-1352 homing_parameter_set
+        物理的なホーミングなしで座標を0にリセットする
+        """
+        config = self._axis_configs[axis]
+        
+        # 1. ドライブ速度を設定
+        await asyncio.to_thread(
+            self._native_lib.set_drive_speed, axis, config.max_speed, False)
+        
+        # 2. 論理座標を0に設定
+        await asyncio.to_thread(
+            self._native_lib.set_logical_coordinate, axis, 0)
+        
+        # 3. 相対座標を0に設定
+        await asyncio.to_thread(
+            self._native_lib.set_relative_coordinate, axis, 0)
+        
+        # 4. ソフトリミット設定
+        limit_minus = self._mm_to_pulse(axis, config.limit_minus)
+        limit_plus = self._mm_to_pulse(axis, config.limit_plus)
+        await asyncio.to_thread(
+            self._native_lib.set_soft_limit, axis, limit_minus, limit_plus)
     
     async def _homing_check_step(self, axis: int) -> bool:
         """ステッピング原点復帰チェック"""
@@ -1632,15 +1881,73 @@ class MotionController:
     # =========================================================================
     
     async def _homing_start_astep(self, axis: int) -> None:
-        """aSTEP原点復帰開始"""
-        pass
+        """aSTEP原点復帰開始
+        
+        参照: TEACHING/motion_control.py L1569-1609 nova_homing_move_start_aSTEP
+        
+        注意: origin_sensor == 0 (OFF) の場合、物理的なホーミングは行わず、
+        パラメータ設定のみ行います。
+        """
+        config = self._axis_configs[axis]
+        
+        # origin_sensor == AUTO(2) の場合のみオートオリジンを実行
+        if config.origin_sensor == 2:  # AUTO
+            await self._nova_homing_start_astep(axis)
+        else:
+            # パラメータ設定のみ（物理的なホーミングなし）
+            await self._homing_parameter_set(axis)
+            logger.info(f"Axis {axis} (aSTEP): OriginSensor=OFF, skipping physical homing")
+    
+    async def _nova_homing_start_astep(self, axis: int) -> None:
+        """aSTEP NOVAオートホーミング開始
+        
+        参照: TEACHING/motion_control.py L1569-1609 nova_homing_move_start_aSTEP
+        origin_sensor == AUTO の場合のみ呼ばれる
+        """
+        config = self._axis_configs[axis]
+        
+        # 1. ドライブ速度を設定
+        origin_speed_pulse = self._mm_to_pulse(axis, config.origin_speed)
+        await asyncio.to_thread(
+            self._native_lib.set_drive_speed, axis, origin_speed_pulse, False)
+        
+        # 2. オートホーミングモードを設定
+        # orgn_dir: 0x02 for CW, 0x00 for CCW
+        orgn_dir = 0x02 if config.origin_dir == 0 else 0x00
+        h1m = 0x315 | orgn_dir
+        h2m = 0x686
+        await asyncio.to_thread(
+            self._native_lib.set_origin_mode, axis, h1m, h2m, False)
+        
+        # 3. オートオリジンコマンド発行
+        hv = origin_speed_pulse - 1
+        dv = origin_speed_pulse
+        result = await asyncio.to_thread(
+            self._native_lib.auto_origin, axis, hv, dv)
+        
+        if not result:
+            logger.error(f"aSTEP auto origin failed: axis={axis}")
     
     async def _homing_check_astep(self, axis: int) -> bool:
-        """aSTEP原点復帰チェック"""
+        """aSTEP原点復帰チェック
+        
+        参照: TEACHING/motion_control.py L1611 nova_homing_move_check_aSTEP
+        is_busy = False のとき完了
+        """
         if self.simulation_mode:
             return True
+        
+        # ステータスを更新してからチェック
+        await self._update_axis_status(axis)
         status = self._axis_status.get(axis)
-        return status and not status.is_busy if status else False
+        
+        if status is None:
+            return False
+        
+        # Busyでなければ完了
+        # ただし、ホーミング開始直後はまだBusyになっていない可能性があるので
+        # 少し待ってからチェックする
+        return not status.is_busy
     
     async def _servo_on_off_astep(self, axis: int, on: bool) -> None:
         """aSTEPサーボON/OFF"""
