@@ -73,12 +73,10 @@ import logging
 import time
 from pathlib import Path
 
-try:
-    import RPi.GPIO as GPIO
-    HAS_GPIO = True
-except ImportError:
-    HAS_GPIO = False
-    GPIO = None
+# 注意: RPi.GPIOは使用しない
+# libcsms_splebo_n.soが内部でpigpioを使用しており、
+# RPi.GPIOとpigpioを同時に使用するとGPIO設定が競合する
+# 詳細: docs/GPIO_CONFLICT_ISSUE.md 参照
 
 try:
     import smbus
@@ -86,6 +84,217 @@ try:
 except ImportError:
     HAS_SMBUS = False
     smbus = None
+
+# pigpioのインポートと初期化
+# libcsms_splebo_n.so がpigpioを内部的に使用しているため必要
+try:
+    import pigpio
+    HAS_PIGPIO = True
+except ImportError:
+    HAS_PIGPIO = False
+    pigpio = None
+
+# グローバルなpigpioライブラリ・インスタンス
+_pigpio_lib = None           # ctypes経由のlibpigpio.soハンドル
+_pigpio_instance = None      # Pythonのpigpio.pi()インスタンス
+_pigpio_initialized = False
+
+def _load_pigpio_lib():
+    """pigpio Cライブラリをロードする（内部関数）"""
+    global _pigpio_lib
+    
+    if _pigpio_lib is not None:
+        return _pigpio_lib
+    
+    import ctypes
+    from ctypes import c_int
+    
+    pigpio_lib_paths = [
+        "libpigpio.so",
+        "libpigpio.so.1",
+        "/usr/lib/libpigpio.so",
+        "/usr/lib/arm-linux-gnueabihf/libpigpio.so",
+        "/usr/local/lib/libpigpio.so",
+    ]
+    
+    for path in pigpio_lib_paths:
+        try:
+            _pigpio_lib = ctypes.cdll.LoadLibrary(path)
+            # 関数シグネチャの設定
+            _pigpio_lib.gpioInitialise.restype = c_int
+            _pigpio_lib.gpioTerminate.restype = None
+            _pigpio_lib.gpioRead.argtypes = (c_int,)
+            _pigpio_lib.gpioRead.restype = c_int
+            _pigpio_lib.gpioWrite.argtypes = (c_int, c_int)
+            _pigpio_lib.gpioWrite.restype = c_int
+            _pigpio_lib.gpioSetMode.argtypes = (c_int, c_int)
+            _pigpio_lib.gpioSetMode.restype = c_int
+            logger.debug(f"pigpioライブラリ読み込み成功: {path}")
+            return _pigpio_lib
+        except OSError:
+            continue
+    
+    return None
+
+
+def initialize_pigpio() -> bool:
+    """pigpioを初期化する
+    
+    libcsms_splebo_n.soがpigpioを内部的に使用しているため、
+    ライブラリ使用前にgpioInitialise()を呼び出す必要があります。
+    
+    注意: 
+    - ネイティブライブラリはCレベルのgpioInitialise()を必要とする
+    - pigpiodが起動している場合は停止してから実行: sudo killall pigpiod
+    - root権限が必要: sudo python ...
+    
+    Returns:
+        初期化成功時True、失敗時False
+    """
+    global _pigpio_instance, _pigpio_initialized
+    
+    if _pigpio_initialized:
+        return True  # 既に初期化済み
+    
+    # 方法1: ctypesでlibpigpio.soを直接ロードしてgpioInitialise()を呼び出す
+    pigpio_lib = _load_pigpio_lib()
+    
+    if pigpio_lib is not None:
+        try:
+            result = pigpio_lib.gpioInitialise()
+            if result >= 0:
+                _pigpio_initialized = True
+                logger.info(f"gpioInitialise() 成功 (version: {result})")
+                return True
+            else:
+                logger.warning(f"gpioInitialise() 失敗 (エラーコード: {result})")
+                logger.info("root権限で実行してください: sudo python ...")
+        except Exception as e:
+            logger.warning(f"gpioInitialise()エラー: {e}")
+    else:
+        logger.warning("libpigpio.soが見つかりません")
+    
+    # 方法2: Pythonのpigpioモジュール経由でデーモン接続（フォールバック）
+    # 注意: デーモンモードは cw_mc_open() が内部で gpioInitialise() を呼ぶため非推奨
+    if HAS_PIGPIO:
+        try:
+            _pigpio_instance = pigpio.pi()
+            if _pigpio_instance.connected:
+                logger.info("pigpioデーモンに接続しました（デーモンモード）")
+                logger.warning("警告: デーモンモードでは一部機能が制限される可能性があります")
+                return True
+            else:
+                logger.error("pigpioデーモンに接続できません。")
+                logger.info("解決策: sudo killall pigpiod && sudo python ...")
+                _pigpio_instance = None
+        except Exception as e:
+            logger.warning(f"pigpioデーモン接続エラー: {e}")
+    
+    return False
+
+
+def gpio_read(pin: int) -> int:
+    """GPIOピンを読み取る（pigpio経由）
+    
+    RPi.GPIOの代わりにpigpioを使用してGPIOを読み取る。
+    これにより、libcsms_splebo_n.soとのGPIO競合を防ぐ。
+    
+    Args:
+        pin: GPIOピン番号（BCM）
+    
+    Returns:
+        0 または 1、エラー時は -1
+    """
+    global _pigpio_lib, _pigpio_instance
+    
+    # Cライブラリ経由
+    if _pigpio_lib is not None:
+        return _pigpio_lib.gpioRead(pin)
+    
+    # Pythonインスタンス経由
+    if _pigpio_instance is not None and _pigpio_instance.connected:
+        return _pigpio_instance.read(pin)
+    
+    logger.warning(f"GPIO{pin}を読み取れません: pigpioが初期化されていません")
+    return -1
+
+
+def gpio_write(pin: int, value: int) -> bool:
+    """GPIOピンに書き込む（pigpio経由）
+    
+    Args:
+        pin: GPIOピン番号（BCM）
+        value: 0 または 1
+    
+    Returns:
+        成功時True
+    """
+    global _pigpio_lib, _pigpio_instance
+    
+    # Cライブラリ経由
+    if _pigpio_lib is not None:
+        result = _pigpio_lib.gpioWrite(pin, value)
+        return result == 0
+    
+    # Pythonインスタンス経由
+    if _pigpio_instance is not None and _pigpio_instance.connected:
+        _pigpio_instance.write(pin, value)
+        return True
+    
+    logger.warning(f"GPIO{pin}に書き込めません: pigpioが初期化されていません")
+    return False
+
+
+def cleanup_pigpio():
+    """pigpioをクリーンアップする"""
+    global _pigpio_lib, _pigpio_instance, _pigpio_initialized
+    
+    # Pythonインスタンスのクリーンアップ
+    if _pigpio_instance is not None:
+        try:
+            _pigpio_instance.stop()
+        except:
+            pass
+        _pigpio_instance = None
+    
+    # Cレベルのgpioをクリーンアップ
+    if _pigpio_initialized and _pigpio_lib is not None:
+        try:
+            _pigpio_lib.gpioTerminate()
+            logger.debug("gpioTerminate() 呼び出し完了")
+        except Exception as e:
+            logger.warning(f"gpioTerminate()エラー: {e}")
+        _pigpio_initialized = False
+
+
+def get_pigpio_lib():
+    """pigpio Cライブラリハンドルを取得する
+    
+    Returns:
+        ctypes経由のlibpigpio.soハンドル、未初期化時はNone
+    """
+    return _pigpio_lib
+
+
+def is_pigpio_initialized() -> bool:
+    """pigpioが初期化されているか確認する
+    
+    Returns:
+        True: 初期化済み
+    """
+    return _pigpio_initialized
+
+
+def is_emergency_active() -> bool:
+    """非常停止スイッチの状態を確認する
+    
+    Returns:
+        True: 非常停止中、False: 正常
+    """
+    value = gpio_read(GPIOPin.EMG_SW)
+    # GPIO15はLOW(0)で正常、HIGH(1)で非常停止
+    return value != 0
+
 
 from .constants import Axis, AxisMask, GPIOPin, NOVARegister
 
@@ -224,8 +433,17 @@ class MotionOrder:
 
 @dataclass
 class IOExpanderConfig:
-    """I/Oエキスパンダ設定"""
-    i2c_bus: int = 3
+    """I/Oエキスパンダ設定
+    
+    オリジナルのio_expander.pyから:
+    - kI2c_bus = 5 (オリジナル、現在のシステムでは存在しない)
+    - 利用可能なバス: /dev/i2c-1, /dev/i2c-3, /dev/i2c-20, /dev/i2c-21
+    - kExpand_module_address_0 = 0x21 (Input Board 0)
+    - kExpand_module_address_1 = 0x24 (Output Board 0)
+    - kExpand_module_address_2 = 0x23 (Input Board 1)
+    - kExpand_module_address_3 = 0x26 (Output Board 1)
+    """
+    i2c_bus: int = 3  # 環境に合わせて調整
     input_address: int = 0x21
     output_address: int = 0x24
     board_count: int = 4
@@ -241,33 +459,76 @@ class NativeLibrary:
     libcsms_splebo_n.so ネイティブライブラリのctypesラッパー
     
     NOVAモーションコントローラボードへの低レベルアクセスを提供
+    
+    参照元: TEACHING/motion_control.py L31
+        eCsms_lib = ctype.cdll.LoadLibrary("./libcsms_splebo_n.so")
     """
     
-    def __init__(self, library_path: str = "./libcsms_splebo_n.so"):
+    # ライブラリの検索パス
+    LIBRARY_SEARCH_PATHS = [
+        "./libcsms_splebo_n.so",
+        "/home/splebopi/SPLEBO/TEACHING/libcsms_splebo_n.so",
+        "/home/splebopi/SPLEBO/AutomatedAssemblyRobot/libcsms_splebo_n.so",
+        "/home/splebopi/SPLEBO/AutomatedAssemblyRobot/src/robot/libcsms_splebo_n.so",
+        "/usr/local/lib/libcsms_splebo_n.so",
+        "/usr/lib/libcsms_splebo_n.so",
+    ]
+    
+    def __init__(self, library_path: Optional[str] = None):
         self.library_path = library_path
         self._lib: Optional[ctypes.CDLL] = None
         self._loaded = False
     
     def load(self) -> bool:
-        """ライブラリをロード"""
-        try:
-            self._lib = ctypes.cdll.LoadLibrary(self.library_path)
-            self._setup_function_signatures()
-            self._loaded = True
-            logger.info(f"Native library loaded: {self.library_path}")
-            return True
-        except OSError as e:
-            logger.error(f"Failed to load native library: {e}")
-            self._loaded = False
-            return False
+        """ライブラリをロード（複数のパスを検索）"""
+        import os
+        
+        # 指定されたパスがあればそれを優先
+        search_paths = [self.library_path] if self.library_path else []
+        search_paths.extend(self.LIBRARY_SEARCH_PATHS)
+        
+        for path in search_paths:
+            if path is None:
+                continue
+            if os.path.exists(path):
+                try:
+                    self._lib = ctypes.cdll.LoadLibrary(path)
+                    self._setup_function_signatures()
+                    self._loaded = True
+                    self.library_path = path
+                    logger.info(f"Native library loaded: {path}")
+                    return True
+                except OSError as e:
+                    logger.warning(f"Failed to load library from {path}: {e}")
+                    continue
+        
+        logger.error(f"Failed to load native library from any path")
+        self._loaded = False
+        return False
     
     def _setup_function_signatures(self):
-        """関数シグネチャの設定"""
+        """
+        関数シグネチャの設定
+        
+        libcsms_splebo_n.so で利用可能な関数（nm -D で確認済み）:
+            cw_mc_open, cw_mc_close, cw_mc_abs, cw_mc_ptp, cw_mc_jog,
+            cw_mc_stop, cw_mc_dcc_stop, cw_mc_org,
+            cw_mc_set_mode, cw_mc_set_drive, cw_mc_set_iv, cw_mc_set_acc, cw_mc_set_dec,
+            cw_mc_set_org_mode, cw_mc_set_signal_io, cw_mc_set_input_filter, cw_mc_set_slimit,
+            cw_mc_set_intrpt_mode, cw_mc_set_logic_cie, cw_mc_set_real_cie,
+            cw_mc_set_gen_out, cw_mc_set_gen_bout,
+            cw_mc_get_logic_cie, cw_mc_get_sts,
+            cw_mc_r_reg, cw_mc_w_reg, cw_mc_r_reg_axis, cw_mc_w_reg_axis, cw_mc_w_reg67,
+            cw_mc_line_intrpt, cw_mc_circ_intrpt
+        
+        注意: cw_mc_get_real_cie, cw_mc_get_gen_io は存在しない
+        """
         if not self._lib:
             return
         
-        # Board Open
+        # Board Open/Close
         self._lib.cw_mc_open.restype = c_bool
+        self._lib.cw_mc_close.restype = c_bool
         
         # Set Mode
         self._lib.cw_mc_set_mode.argtypes = (c_int, c_int, c_int, c_int, c_bool)
@@ -290,32 +551,32 @@ class NativeLibrary:
         self._lib.cw_mc_set_dec.restype = c_bool
         
         # Set Return Origin Mode
-        self._lib.cw_mc_set_return_org.argtypes = (c_int, c_int, c_int, c_bool)
-        self._lib.cw_mc_set_return_org.restype = c_bool
+        self._lib.cw_mc_set_org_mode.argtypes = (c_int, c_int, c_int, c_bool)
+        self._lib.cw_mc_set_org_mode.restype = c_bool
         
         # Set I/O Signal
-        self._lib.cw_mc_set_pio.argtypes = (c_int, c_int, c_int, c_bool)
-        self._lib.cw_mc_set_pio.restype = c_bool
+        self._lib.cw_mc_set_signal_io.argtypes = (c_int, c_int, c_int, c_bool)
+        self._lib.cw_mc_set_signal_io.restype = c_bool
         
         # Set Input Signal Filter
         self._lib.cw_mc_set_input_filter.argtypes = (c_int, c_int, c_bool)
         self._lib.cw_mc_set_input_filter.restype = c_bool
         
-        # Auto Origin
-        self._lib.cw_mc_auto_home.argtypes = (c_int, c_int, c_int)
-        self._lib.cw_mc_auto_home.restype = c_bool
+        # Auto Origin (参照: motion_control.py L1751 - cw_mc_org)
+        self._lib.cw_mc_org.argtypes = (c_int, c_int, c_int)
+        self._lib.cw_mc_org.restype = c_bool
         
         # Set Soft Limit
-        self._lib.cw_mc_set_soft_limit.argtypes = (c_int, c_int, c_int)
-        self._lib.cw_mc_set_soft_limit.restype = c_bool
+        self._lib.cw_mc_set_slimit.argtypes = (c_int, c_int, c_int)
+        self._lib.cw_mc_set_slimit.restype = c_bool
         
         # Move Absolute
         self._lib.cw_mc_abs.argtypes = (c_int, c_int, c_int)
         self._lib.cw_mc_abs.restype = c_bool
         
-        # Move Relative
-        self._lib.cw_mc_rel.argtypes = (c_int, c_int, c_int, c_bool)
-        self._lib.cw_mc_rel.restype = c_bool
+        # Move Relative (参照: motion_control.py L1777 - cw_mc_ptp)
+        self._lib.cw_mc_ptp.argtypes = (c_int, c_int, c_int, c_bool)
+        self._lib.cw_mc_ptp.restype = c_bool
         
         # Move JOG
         self._lib.cw_mc_jog.argtypes = (c_int, c_bool, c_int)
@@ -333,21 +594,13 @@ class NativeLibrary:
         self._lib.cw_mc_get_logic_cie.argtypes = (c_int, POINTER(c_int))
         self._lib.cw_mc_get_logic_cie.restype = c_bool
         
-        # Get Relative Coordinate
-        self._lib.cw_mc_get_real_cie.argtypes = (c_int, POINTER(c_int))
-        self._lib.cw_mc_get_real_cie.restype = c_bool
-        
         # Set Logical Coordinate
         self._lib.cw_mc_set_logic_cie.argtypes = (c_int, c_int)
         self._lib.cw_mc_set_logic_cie.restype = c_bool
         
-        # Set Relative Coordinate
+        # Set Relative Coordinate (get版は存在しない)
         self._lib.cw_mc_set_real_cie.argtypes = (c_int, c_int)
         self._lib.cw_mc_set_real_cie.restype = c_bool
-        
-        # Get General I/O
-        self._lib.cw_mc_get_gen_io.argtypes = (c_int, POINTER(c_int))
-        self._lib.cw_mc_get_gen_io.restype = c_bool
         
         # Set General Output
         self._lib.cw_mc_set_gen_out.argtypes = (c_int, c_int)
@@ -368,6 +621,14 @@ class NativeLibrary:
         # Read Register
         self._lib.cw_mc_r_reg.argtypes = (c_int, c_int, POINTER(c_int))
         self._lib.cw_mc_r_reg.restype = c_bool
+        
+        # Write Register 6/7
+        self._lib.cw_mc_w_reg67.argtypes = (c_int, c_int)
+        self._lib.cw_mc_w_reg67.restype = c_bool
+        
+        # Set Interpolation Mode
+        self._lib.cw_mc_set_intrpt_mode.argtypes = (c_int, c_int, c_bool)
+        self._lib.cw_mc_set_intrpt_mode.restype = c_bool
     
     @property
     def is_loaded(self) -> bool:
@@ -417,7 +678,7 @@ class NativeLibrary:
         """ソフトリミットを設定"""
         if not self._lib:
             return False
-        return bool(self._lib.cw_mc_set_soft_limit(axis, limit_minus, limit_plus))
+        return bool(self._lib.cw_mc_set_slimit(axis, limit_minus, limit_plus))
     
     def move_absolute(self, axis: int, target_position: int, speed: int) -> bool:
         """絶対位置移動"""
@@ -426,10 +687,10 @@ class NativeLibrary:
         return bool(self._lib.cw_mc_abs(axis, target_position, speed))
     
     def move_relative(self, axis: int, distance: int, speed: int, abs_mode: bool = False) -> bool:
-        """相対位置移動"""
+        """相対位置移動 (参照: motion_control.py L1777 - cw_mc_ptp)"""
         if not self._lib:
             return False
-        return bool(self._lib.cw_mc_rel(axis, distance, speed, abs_mode))
+        return bool(self._lib.cw_mc_ptp(axis, distance, speed, abs_mode))
     
     def move_jog(self, axis: int, ccw: bool, speed: int) -> bool:
         """JOG移動"""
@@ -465,13 +726,24 @@ class NativeLibrary:
             return False
         return bool(self._lib.cw_mc_set_logic_cie(axis, coord))
     
-    def get_general_io(self, axis: int) -> Optional[int]:
-        """汎用I/Oを取得"""
+    def set_relative_coordinate(self, axis: int, coord: int) -> bool:
+        """相対座標を設定"""
+        if not self._lib:
+            return False
+        return bool(self._lib.cw_mc_set_real_cie(axis, coord))
+    
+    def get_axis_status(self, axis: int, sts_no: int) -> Optional[int]:
+        """
+        軸ステータスを取得
+        
+        ライブラリにcw_mc_get_gen_ioが存在しないため、
+        cw_mc_get_stsを使用してステータスを取得します。
+        """
         if not self._lib:
             return None
         buffer = (c_int * 16)()
         ptr = cast(buffer, POINTER(c_int))
-        if self._lib.cw_mc_get_gen_io(axis, ptr):
+        if self._lib.cw_mc_get_sts(axis, ptr, sts_no):
             return ptr.contents.value
         return None
     
@@ -738,6 +1010,12 @@ class MotionController:
         logger.info("Initializing motion controller...")
         
         try:
+            # Initialize pigpio first (required by libcsms_splebo_n.so)
+            if not self.simulation_mode:
+                if not initialize_pigpio():
+                    logger.warning("pigpio initialization failed - I2C functions may not work")
+                    logger.info("pigpiodデーモンを起動してください: sudo pigpiod")
+            
             # Initialize GPIO
             if not self.simulation_mode:
                 await self._initialize_gpio()
@@ -752,14 +1030,8 @@ class MotionController:
             # Initialize I/O expander
             await self._io_expander.initialize()
             
-            # Start control loop
-            self._running = True
-            self._control_loop_task = asyncio.create_task(self._control_loop())
-            
-            # Wait a bit for the control loop to start
-            await asyncio.sleep(0.1)
-            
-            # Open motion board
+            # Open motion board (MUST be done before starting control loop)
+            # cw_mc_open() initializes I2C handles and GPIO
             if not self.simulation_mode:
                 if not await self._open_board():
                     logger.error("Failed to open motion board")
@@ -768,6 +1040,13 @@ class MotionController:
             
             # Configure axes
             await self._configure_axes()
+            
+            # Start control loop (after board is opened)
+            self._running = True
+            self._control_loop_task = asyncio.create_task(self._control_loop())
+            
+            # Wait a bit for the control loop to start
+            await asyncio.sleep(0.1)
             
             # Initialize I/O expander hardware
             if not self.simulation_mode:
@@ -784,31 +1063,24 @@ class MotionController:
             return False
     
     async def _initialize_gpio(self) -> None:
-        """GPIO初期化"""
-        if not HAS_GPIO:
-            logger.warning("RPi.GPIO not available")
-            return
+        """GPIO初期化
         
-        try:
-            GPIO.setmode(GPIO.BCM)
-            GPIO.setwarnings(False)
-            
-            # Power pin
-            GPIO.setup(GPIOPin.NOVA_POWER, GPIO.OUT, initial=GPIO.HIGH)
-            # Reset pin
-            GPIO.setup(GPIOPin.NOVA_RESET, GPIO.OUT, initial=GPIO.LOW)
-            
-            # Power on sequence
-            GPIO.output(GPIOPin.NOVA_POWER, True)
-            await asyncio.sleep(0.1)
-            GPIO.output(GPIOPin.NOVA_RESET, False)
-            await asyncio.sleep(0.1)
-            
-            self._gpio_initialized = True
-            logger.info("GPIO initialized")
-            
-        except Exception as e:
-            logger.error(f"GPIO initialization failed: {e}")
+        注意: cw_mc_open()が内部でpigpioを使用してGPIO12/14を設定するため、
+        ここではRPi.GPIOを使用しない（競合を防ぐため）。
+        詳細: docs/GPIO_CONFLICT_ISSUE.md 参照
+        """
+        # cw_mc_open()が以下を実行する:
+        #   gpioInitialise()
+        #   gpioSetMode(12, OUTPUT)  # NOVA_POWER
+        #   gpioSetMode(14, OUTPUT)  # NOVA_RESET  
+        #   gpioWrite(12, HIGH)      # 電源ON
+        #   gpioWrite(14, LOW)       # リセット解除
+        # 
+        # したがって、ここでのGPIO初期化は不要
+        # RPi.GPIOを使用すると、pigpioの設定を上書きしてI2C通信が失敗する
+        
+        self._gpio_initialized = True
+        logger.info("GPIO initialization delegated to cw_mc_open()")
     
     async def _open_board(self) -> bool:
         """モーションボードを開く"""
@@ -941,16 +1213,17 @@ class MotionController:
                 self._axis_status[axis].abs_coord = round(
                     coord * config.pulse_length, 2)
             
-            # Get I/O status
-            io_data = await asyncio.to_thread(
-                self._native_lib.get_general_io, axis)
-            if io_data is not None:
+            # Get axis status using cw_mc_get_sts
+            # sts_no=0 で基本的なステータスを取得
+            sts_data = await asyncio.to_thread(
+                self._native_lib.get_axis_status, axis, 0)
+            if sts_data is not None:
                 status = self._axis_status[axis]
-                # Parse I/O bits (motor-type dependent)
-                # This is a simplified version
-                status.is_busy = bool(io_data & 0x01)
-                status.is_alarm = bool(io_data & 0x02)
-                status.is_in_position = bool(io_data & 0x04)
+                # Parse status bits from cw_mc_get_sts
+                # Bit 0: Busy, Bit 1: Alarm, Bit 2: In-position
+                status.is_busy = bool(sts_data & 0x01)
+                status.is_alarm = bool(sts_data & 0x02)
+                status.is_in_position = bool(sts_data & 0x04)
                 
         except Exception as e:
             logger.error(f"Failed to update axis {axis} status: {e}")
@@ -1437,9 +1710,8 @@ class MotionController:
                 if self._axis_configs[axis].motor_type != MotorType.NONE:
                     await self.servo_off(axis)
         
-        # Cleanup GPIO
-        if self._gpio_initialized and HAS_GPIO:
-            GPIO.cleanup()
+        # Cleanup pigpio
+        cleanup_pigpio()
         
         self._initialized = False
         self._state = ControllerState.UNINITIALIZED

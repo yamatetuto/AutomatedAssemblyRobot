@@ -17,6 +17,7 @@ MCP2515 CANコントローラをSPI経由で制御し、I/Oエキスパンダボ
     - threading.Thread → asyncio.Task に変換
     - グローバル変数 → インスタンス変数に変換
     - シミュレーションモード追加（ハードウェアなしでテスト可能）
+    - RPi.GPIO → pigpio に変更（GPIO競合回避、docs/GPIO_CONFLICT_ISSUE.md参照）
 """
 import asyncio
 import logging
@@ -26,13 +27,20 @@ from dataclasses import dataclass, field
 logger = logging.getLogger(__name__)
 
 # ハードウェア依存モジュール（実行時にインポート）
+# 注意: RPi.GPIOはpigpioと競合するため使用しない
 try:
     import spidev
-    import RPi.GPIO as GPIO
-    HAS_HARDWARE = True
+    HAS_SPIDEV = True
 except ImportError:
-    HAS_HARDWARE = False
-    logger.warning("ハードウェアモジュール(spidev, RPi.GPIO)が見つかりません。シミュレーションモードで動作します。")
+    HAS_SPIDEV = False
+    spidev = None
+    logger.warning("spidevが見つかりません。シミュレーションモードで動作します。")
+
+# pigpio経由でGPIOを制御（motion_controllerからインポート）
+from src.robot.motion_controller import (
+    initialize_pigpio, gpio_read, gpio_write,
+    get_pigpio_lib, is_pigpio_initialized
+)
 
 from src.robot.constants import MCP2515, CANConfig, GPIOPin
 
@@ -112,7 +120,7 @@ class CANController:
         self.is_initialized = False
         # simulation_modeが明示的に指定されていればそれを使用、
         # そうでなければハードウェア有無で判定
-        self._simulation_mode = simulation_mode or not HAS_HARDWARE
+        self._simulation_mode = simulation_mode or not HAS_SPIDEV
     
     async def initialize(self) -> bool:
         """
@@ -149,13 +157,21 @@ class CANController:
             return False
     
     def _init_gpio(self) -> None:
-        """GPIO初期化（同期処理）"""
-        GPIO.setmode(GPIO.BCM)
-        GPIO.setwarnings(False)
-        GPIO.setup(self.gpio_cs_pin, GPIO.OUT)
-        GPIO.output(self.gpio_cs_pin, GPIO.HIGH)
-        self._gpio_initialized = True
-        logger.debug(f"GPIO CS pin {self.gpio_cs_pin} initialized")
+        """GPIO初期化（同期処理）
+        
+        注意: RPi.GPIOではなくpigpioを使用する（GPIO競合回避）
+        pigpioはmotion_controller.pyのinitialize_pigpio()で初期化済み
+        """
+        # pigpioでCSピンを出力に設定し、HIGHに設定
+        # gpioSetModeの引数: 0=INPUT, 1=OUTPUT
+        pigpio_lib = get_pigpio_lib()
+        if pigpio_lib is not None:
+            pigpio_lib.gpioSetMode(self.gpio_cs_pin, 1)  # OUTPUT
+            gpio_write(self.gpio_cs_pin, 1)  # HIGH
+            self._gpio_initialized = True
+            logger.debug(f"GPIO CS pin {self.gpio_cs_pin} initialized (pigpio)")
+        else:
+            logger.warning(f"GPIO CS pin {self.gpio_cs_pin} initialization skipped: pigpio not loaded")
     
     def _init_spi(self) -> None:
         """SPI初期化（同期処理）"""
@@ -219,15 +235,22 @@ class CANController:
         
         Returns:
             受信データ
+        
+        Note:
+            pigpio経由でCSピンを制御（RPi.GPIOは使用しない）
         """
         if self._simulation_mode:
             return [0] * len(data)
         
         async with self._spi_lock:
+            cs_pin = self.gpio_cs_pin
+            
             def _transfer():
-                GPIO.output(self.gpio_cs_pin, GPIO.LOW)
+                # CSをLOWに設定（pigpio経由）
+                gpio_write(cs_pin, 0)
                 result = self._spi.xfer2(data)
-                GPIO.output(self.gpio_cs_pin, GPIO.HIGH)
+                # CSをHIGHに設定（pigpio経由）
+                gpio_write(cs_pin, 1)
                 return result
             
             result = await asyncio.to_thread(_transfer)
