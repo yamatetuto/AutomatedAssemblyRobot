@@ -400,6 +400,7 @@ class AxisConfig:
     offset_speed: float = 10.0
     origin_sensor: int = 0  # 0: OFF, 1: ON, 2: AUTO
     origin_order: int = 1   # 原点復帰順序 (大きい値が先に実行)
+    motor_dir: int = 0      # 0: 正方向, 1: 反転
 
 
 @dataclass
@@ -1394,13 +1395,26 @@ class MotionController:
     # =========================================================================
     
     def _mm_to_pulse(self, axis: int, mm: float) -> int:
-        """mm→パルス変換"""
+        """mm→パルス変換
+        
+        motor_dir=1の場合、符号を反転する
+        """
         config = self._axis_configs[axis]
-        return int((mm * 100) / (config.pulse_length * 100))
+        pulse = int((mm * 100) / (config.pulse_length * 100))
+        # motor_dir=1 で方向反転
+        if config.motor_dir == 1:
+            pulse = -pulse
+        return pulse
     
     def _pulse_to_mm(self, axis: int, pulse: int) -> float:
-        """パルス→mm変換"""
+        """パルス→mm変換
+        
+        motor_dir=1の場合、符号を反転する
+        """
         config = self._axis_configs[axis]
+        # motor_dir=1 で方向反転
+        if config.motor_dir == 1:
+            pulse = -pulse
         return round(pulse * config.pulse_length, 2)
     
     def _speed_percent_to_pulse(self, axis: int, speed_percent: float) -> int:
@@ -1478,10 +1492,13 @@ class MotionController:
             コマンド発行成功
         """
         if not self.is_ready:
+            logger.warning(f"Move relative failed: not ready (state={self._state})")
             return False
         
         distance_pulse = self._mm_to_pulse(axis, distance_mm)
         speed_pulse = self._speed_percent_to_pulse(axis, speed_percent)
+        
+        logger.debug(f"Move relative params: axis={axis}, dist_mm={distance_mm}, dist_pulse={distance_pulse}, speed_pulse={speed_pulse}")
         
         self._state = ControllerState.MOVING
         
@@ -1499,7 +1516,9 @@ class MotionController:
                 self._native_lib.move_relative, axis, distance_pulse, speed_pulse, False)
         
         if result:
-            logger.debug(f"Move relative: axis={axis}, dist={distance_mm}mm")
+            logger.debug(f"Move relative: axis={axis}, dist={distance_mm}mm - SUCCESS")
+        else:
+            logger.error(f"Move relative: axis={axis}, dist={distance_mm}mm - FAILED (cw_mc_ptp returned False)")
         
         return result
     
