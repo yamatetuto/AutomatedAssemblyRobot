@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Optional
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException, Request, WebSocket
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -28,19 +28,19 @@ from src.config.settings import (
     OCTOPRINT_URL,
     OCTOPRINT_API_KEY,
     OCTOPRINT_POLL_INTERVAL,
-    ROBOT_SIMULATION_MODE,
+    ROBOT_TEACHING_DIR,
+    ROBOT_POSITION_FILE,
+    ROBOT_JOG_MIN_SPEED_MM_S,
+    ROBOT_JOG_MAX_SPEED_MM_S,
+    ROBOT_JOG_DEFAULT_SPEED_MM_S,
+    ROBOT_JOG_POLL_INTERVAL,
+    ROBOT_SOFT_LIMIT_MIN_MM,
+    ROBOT_SOFT_LIMIT_MAX_MM,
 )
 from src.printer.octoprint_client import OctoPrintClient, OctoPrintError
 from src.printer.printer_manager import PrinterManager
 from src.vision.manager import VisionManager
-
-# SPLEBO-N ロボット制御モジュール
-from src.robot import (
-    RobotManager,
-    create_robot_router,
-    RobotWebSocketManager,
-    create_robot_manager,
-)
+from src.robot.teaching_manager import TeachingRobotManager
 
 # ロギング設定
 logging.basicConfig(
@@ -55,35 +55,16 @@ gripper_manager: Optional[GripperManager] = None
 webrtc_manager: Optional[WebRTCManager] = None
 printer_manager: Optional[PrinterManager] = None
 vision_manager: Optional[VisionManager] = None
-robot_manager: Optional[RobotManager] = None
-robot_ws_manager: Optional[RobotWebSocketManager] = None
+robot_manager: Optional[TeachingRobotManager] = None
 
 
 # Lifespan context manager
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """アプリケーションのライフサイクル管理"""
-    global camera_manager, gripper_manager, webrtc_manager, printer_manager, vision_manager
-    global robot_manager, robot_ws_manager
+    global camera_manager, gripper_manager, webrtc_manager, printer_manager, vision_manager, robot_manager
     
     logger.info("🚀 アプリケーションを起動中...")
-    
-    # SPLEBO-Nロボット初期化
-    try:
-        robot_manager = create_robot_manager(simulation_mode=ROBOT_SIMULATION_MODE)
-        await robot_manager.initialize()
-        robot_ws_manager = RobotWebSocketManager(robot_manager)
-        
-        # ロボットAPIルーターを登録
-        robot_router = create_robot_router(robot_manager)
-        app.include_router(robot_router, prefix="/api/robot", tags=["robot"])
-        
-        mode_str = "シミュレーション" if ROBOT_SIMULATION_MODE else "実機"
-        logger.info(f"✅ SPLEBO-Nロボットサービス起動 ({mode_str}モード)")
-    except Exception as e:
-        logger.error(f"❌ SPLEBO-Nロボットサービス起動失敗: {e}")
-        robot_manager = None
-        robot_ws_manager = None
     
     # カメラ初期化
     try:
@@ -140,9 +121,29 @@ async def lifespan(app: FastAPI):
             printer_manager = None
     else:
         logger.info("ℹ️ OctoPrint設定が未定義のため3Dプリンターサービスをスキップします")
+
+    # ロボット（TEACHING）初期化
+    try:
+        robot_manager = TeachingRobotManager(
+            teaching_dir=ROBOT_TEACHING_DIR,
+            position_file=ROBOT_POSITION_FILE,
+            soft_limit_min_mm=ROBOT_SOFT_LIMIT_MIN_MM,
+            soft_limit_max_mm=ROBOT_SOFT_LIMIT_MAX_MM,
+            jog_speed_min_mm_s=ROBOT_JOG_MIN_SPEED_MM_S,
+            jog_speed_max_mm_s=ROBOT_JOG_MAX_SPEED_MM_S,
+            jog_speed_default_mm_s=ROBOT_JOG_DEFAULT_SPEED_MM_S,
+            jog_poll_interval_s=ROBOT_JOG_POLL_INTERVAL,
+        )
+        await asyncio.to_thread(robot_manager.connect)
+        logger.info("✅ ロボットサービス起動")
+    except Exception as e:
+        logger.error(f"❌ ロボットサービス起動失敗: {e}")
+        robot_manager = None
     
     logger.info("🎉 すべてのサービスが起動しました")
     
+    # アプリ起動後、ここで処理を一時停止
+    # 終了処理が入力されたら再開
     yield
     
     # シャットダウン処理
@@ -159,14 +160,9 @@ async def lifespan(app: FastAPI):
 
     if printer_manager:
         await printer_manager.stop()
-    
-    # SPLEBO-Nロボットシャットダウン
-    if robot_ws_manager:
-        await robot_ws_manager.shutdown()
-    
+
     if robot_manager:
-        await robot_manager.shutdown()
-        logger.info("✅ SPLEBO-Nロボットサービス停止")
+        await asyncio.to_thread(robot_manager.close)
     
     logger.info("👋 すべてのサービスを停止しました")
 
@@ -194,33 +190,32 @@ class PositionData(BaseModel):
     push_current: int
 
 
+class RobotJogRequest(BaseModel):
+    axis: int
+    direction: str
+    speed_mm_s: Optional[float] = None
+
+
+class RobotJogStopRequest(BaseModel):
+    axis: int
+
+
+class RobotPointRegisterRequest(BaseModel):
+    point_no: int
+    comment: str = ""
+
+
+class RobotIOOutputRequest(BaseModel):
+    board_id: int
+    port_no: int
+    on: bool
+
+
 # ルート
+# システムのトップページ（http://10.xx.xx.xx:8080/ など）にアクセスした際実行される
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request):
     """メインページ"""
-
-
-# =============================================================================
-# SPLEBO-N ロボット WebSocket エンドポイント
-# =============================================================================
-
-@app.websocket("/ws/robot")
-async def robot_websocket(websocket: WebSocket):
-    """
-    SPLEBO-Nロボットリアルタイム状態WebSocket
-    
-    クライアントに対して100msごとにロボット状態を配信します。
-    
-    メッセージタイプ:
-        - status: 現在の状態（位置、エラー、モード等）
-        - event: イベント通知（移動完了、原点復帰完了等）
-        - error: エラー通知
-    """
-    if robot_ws_manager is None:
-        await websocket.close(code=1013, reason="Robot service not available")
-        return
-    
-    await robot_ws_manager.handle_connection(websocket)
     return templates.TemplateResponse("index_webrtc_fixed.html", {"request": request})
 
 
@@ -517,6 +512,120 @@ async def printer_present_bed():
         raise HTTPException(status_code=502, detail=str(e))
     except Exception as e:
         logger.error(f"ベッド移動エラー: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ロボットAPI (TEACHING)
+@app.get("/api/robot/config")
+async def robot_config():
+    """ロボット設定取得"""
+    if not robot_manager:
+        raise HTTPException(status_code=503, detail="ロボットサービスが起動していません")
+    return robot_manager.get_config()
+
+
+@app.post("/api/robot/home")
+async def robot_home():
+    """原点復帰"""
+    if not robot_manager:
+        raise HTTPException(status_code=503, detail="ロボットサービスが起動していません")
+    try:
+        await asyncio.to_thread(robot_manager.home)
+        return {"status": "ok", "message": "原点復帰を開始しました"}
+    except Exception as e:
+        logger.error(f"ロボット原点復帰エラー: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/robot/jog/start")
+async def robot_jog_start(request: RobotJogRequest):
+    """JOG開始（押下中のみ動作）"""
+    if not robot_manager:
+        raise HTTPException(status_code=503, detail="ロボットサービスが起動していません")
+
+    direction = request.direction.lower()
+    if direction not in ("positive", "negative"):
+        raise HTTPException(status_code=400, detail="directionは'positive'または'negative'を指定してください")
+
+    speed_mm_s = request.speed_mm_s if request.speed_mm_s is not None else ROBOT_JOG_DEFAULT_SPEED_MM_S
+
+    try:
+        await asyncio.to_thread(
+            robot_manager.jog_start,
+            request.axis,
+            direction == "negative",
+            speed_mm_s,
+        )
+        return {"status": "ok", "axis": request.axis, "direction": direction, "speed_mm_s": speed_mm_s}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"ロボットJOG開始エラー: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/robot/jog/stop")
+async def robot_jog_stop(request: RobotJogStopRequest):
+    """JOG停止"""
+    if not robot_manager:
+        raise HTTPException(status_code=503, detail="ロボットサービスが起動していません")
+    try:
+        await asyncio.to_thread(robot_manager.jog_stop, request.axis)
+        return {"status": "ok", "axis": request.axis}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"ロボットJOG停止エラー: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/robot/stop")
+async def robot_stop_all():
+    """全停止"""
+    if not robot_manager:
+        raise HTTPException(status_code=503, detail="ロボットサービスが起動していません")
+    try:
+        await asyncio.to_thread(robot_manager.stop_all)
+        return {"status": "ok", "message": "停止コマンドを送信しました"}
+    except Exception as e:
+        logger.error(f"ロボット停止エラー: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/robot/point/register")
+async def robot_point_register(request: RobotPointRegisterRequest):
+    """現在位置をポイント登録"""
+    if not robot_manager:
+        raise HTTPException(status_code=503, detail="ロボットサービスが起動していません")
+    try:
+        result = await asyncio.to_thread(
+            robot_manager.register_point_from_current,
+            request.point_no,
+            request.comment,
+        )
+        return {"status": "ok", "data": result}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"ポイント登録エラー: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/robot/io/output")
+async def robot_io_output(request: RobotIOOutputRequest):
+    """CAN-IO出力"""
+    if not robot_manager:
+        raise HTTPException(status_code=503, detail="ロボットサービスが起動していません")
+    try:
+        result = await asyncio.to_thread(
+            robot_manager.io_output,
+            request.board_id,
+            request.port_no,
+            request.on,
+        )
+        return {"status": "ok", "result": result}
+    except Exception as e:
+        logger.error(f"IO出力エラー: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

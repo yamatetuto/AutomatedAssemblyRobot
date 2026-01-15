@@ -6,6 +6,8 @@ const itemsPerPage = 10;
 let isTableView = false;
 let printerStatusInterval = null;
 let printerStatusDisabled = false;
+let robotConfig = null;
+let activeJogAxis = null;
 
 function showToast(message, type = 'info') {
     const toast = document.getElementById('toast');
@@ -474,7 +476,171 @@ window.onload = () => {
     updateMonitorViewUI();
     startPrinterMonitor();
     setInterval(updateGripperStatus, 2000);
+    setupRobotControls();
 };
+
+async function setupRobotControls() {
+    await loadRobotConfig();
+    bindJogButton('robotJogNegative', 'negative');
+    bindJogButton('robotJogPositive', 'positive');
+
+    window.addEventListener('mouseup', robotJogStop);
+    window.addEventListener('touchend', robotJogStop);
+}
+
+async function loadRobotConfig() {
+    try {
+        const response = await fetch('/api/robot/config');
+        if (!response.ok) {
+            return;
+        }
+        robotConfig = await response.json();
+        const speedInput = document.getElementById('robotJogSpeed');
+        if (speedInput && robotConfig) {
+            speedInput.min = robotConfig.jog_speed_min_mm_s;
+            speedInput.max = robotConfig.jog_speed_max_mm_s;
+            speedInput.value = robotConfig.jog_speed_default_mm_s;
+        }
+    } catch (error) {
+        console.error('ロボット設定取得エラー:', error);
+    }
+}
+
+function bindJogButton(buttonId, direction) {
+    const button = document.getElementById(buttonId);
+    if (!button) return;
+
+    const startHandler = (event) => {
+        event.preventDefault();
+        robotJogStart(direction);
+    };
+    const stopHandler = (event) => {
+        if (event) event.preventDefault();
+        robotJogStop();
+    };
+
+    button.addEventListener('mousedown', startHandler);
+    button.addEventListener('touchstart', startHandler, { passive: false });
+    button.addEventListener('mouseup', stopHandler);
+    button.addEventListener('mouseleave', stopHandler);
+    button.addEventListener('touchend', stopHandler);
+}
+
+function getRobotJogAxis() {
+    const axisSelect = document.getElementById('robotJogAxis');
+    return axisSelect ? parseInt(axisSelect.value, 10) : 0;
+}
+
+function getRobotJogSpeed() {
+    const speedInput = document.getElementById('robotJogSpeed');
+    return speedInput ? parseFloat(speedInput.value) : 10.0;
+}
+
+async function robotHome() {
+    try {
+        const response = await fetch('/api/robot/home', { method: 'POST' });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) {
+            throw new Error(payload.detail || '原点復帰に失敗しました');
+        }
+        showToast(payload.message || '原点復帰を開始しました', 'success');
+    } catch (error) {
+        showToast(error.message, 'error');
+    }
+}
+
+async function robotStopAll() {
+    try {
+        const response = await fetch('/api/robot/stop', { method: 'POST' });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) {
+            throw new Error(payload.detail || '停止に失敗しました');
+        }
+        showToast(payload.message || '停止しました', 'success');
+    } catch (error) {
+        showToast(error.message, 'error');
+    }
+}
+
+async function robotJogStart(direction) {
+    const axis = getRobotJogAxis();
+    const speed = getRobotJogSpeed();
+    activeJogAxis = axis;
+    try {
+        const response = await fetch('/api/robot/jog/start', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ axis, direction, speed_mm_s: speed })
+        });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) {
+            throw new Error(payload.detail || 'JOG開始に失敗しました');
+        }
+    } catch (error) {
+        activeJogAxis = null;
+        showToast(error.message, 'error');
+    }
+}
+
+async function robotJogStop() {
+    if (activeJogAxis === null) return;
+    const axis = activeJogAxis;
+    activeJogAxis = null;
+    try {
+        const response = await fetch('/api/robot/jog/stop', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ axis })
+        });
+        await response.json().catch(() => ({}));
+    } catch (error) {
+        console.error('JOG停止エラー:', error);
+    }
+}
+
+async function registerRobotPoint() {
+    const pointNoInput = document.getElementById('robotPointNo');
+    const commentInput = document.getElementById('robotPointComment');
+    const pointNo = pointNoInput ? parseInt(pointNoInput.value, 10) : 0;
+    const comment = commentInput ? commentInput.value : '';
+
+    try {
+        const response = await fetch('/api/robot/point/register', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ point_no: pointNo, comment })
+        });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) {
+            throw new Error(payload.detail || 'ポイント登録に失敗しました');
+        }
+        showToast('ポイントを登録しました', 'success');
+    } catch (error) {
+        showToast(error.message, 'error');
+    }
+}
+
+async function robotIoOutput(on) {
+    const boardInput = document.getElementById('robotIoBoard');
+    const portInput = document.getElementById('robotIoPort');
+    const boardId = boardInput ? parseInt(boardInput.value, 10) : 0;
+    const portNo = portInput ? parseInt(portInput.value, 10) : 0;
+
+    try {
+        const response = await fetch('/api/robot/io/output', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ board_id: boardId, port_no: portNo, on })
+        });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) {
+            throw new Error(payload.detail || 'IO出力に失敗しました');
+        }
+        showToast('IO出力を更新しました', 'success');
+    } catch (error) {
+        showToast(error.message, 'error');
+    }
+}
 
 
 // ===== 電流値モニター =====

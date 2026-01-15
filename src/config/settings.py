@@ -76,35 +76,22 @@ VISION_BEAD_MAX_RADIUS = int(os.getenv('VISION_BEAD_MAX_RADIUS', '50'))
 # ロボット（TEACHING/SPLEBO-N）設定
 # ============================================================
 
-# シミュレーションモード
-# True: ハードウェアなしで動作（開発PC、CI/CDで使用）
-# False: 実機接続（Raspberry Piで使用）
-ROBOT_SIMULATION_MODE = os.getenv("ROBOT_SIMULATION_MODE", "true").lower() in ("true", "1", "yes")
+# TEACHINGディレクトリ
+ROBOT_TEACHING_DIR = PROJECT_ROOT / "src" / "robot" / "TEACHING"
+ROBOT_POSITION_FILE = ROBOT_TEACHING_DIR / "SPLEBO-N.pos"
 
-# CAN通信設定
-ROBOT_CAN_SPI_BUS = int(os.getenv("ROBOT_CAN_SPI_BUS", "0"))
-ROBOT_CAN_SPI_DEVICE = int(os.getenv("ROBOT_CAN_SPI_DEVICE", "0"))
-ROBOT_CAN_SPEED_HZ = int(os.getenv("ROBOT_CAN_SPEED_HZ", "500000"))
+# JOG速度制限 (mm/s)
+ROBOT_JOG_MIN_SPEED_MM_S = float(os.getenv("ROBOT_JOG_MIN_SPEED_MM_S", "1.0"))
+ROBOT_JOG_MAX_SPEED_MM_S = float(os.getenv("ROBOT_JOG_MAX_SPEED_MM_S", "200.0"))
+ROBOT_JOG_DEFAULT_SPEED_MM_S = float(os.getenv("ROBOT_JOG_DEFAULT_SPEED_MM_S", "10.0"))
 
-# GPIO設定
-ROBOT_GPIO_NOVA_RESET = int(os.getenv("ROBOT_GPIO_NOVA_RESET", "14"))
-ROBOT_GPIO_POWER = int(os.getenv("ROBOT_GPIO_POWER", "12"))
-ROBOT_GPIO_CAN_CS = int(os.getenv("ROBOT_GPIO_CAN_CS", "8"))
-ROBOT_GPIO_EMG_SW = int(os.getenv("ROBOT_GPIO_EMG_SW", "15"))
+# JOG監視ポーリング間隔（秒）
+ROBOT_JOG_POLL_INTERVAL = float(os.getenv("ROBOT_JOG_POLL_INTERVAL", "0.05"))
 
-# 軸設定
-ROBOT_AXIS_COUNT = int(os.getenv("ROBOT_AXIS_COUNT", "8"))
-ROBOT_ENABLED_AXES = os.getenv("ROBOT_ENABLED_AXES", "X,Y,Z,U").split(",")
-
-# 速度制限
-ROBOT_MAX_SPEED = int(os.getenv("ROBOT_MAX_SPEED", "100"))
-ROBOT_DEFAULT_SPEED = int(os.getenv("ROBOT_DEFAULT_SPEED", "50"))
-
-# I/Oポーリング間隔（秒）
-ROBOT_IO_POLL_INTERVAL = float(os.getenv("ROBOT_IO_POLL_INTERVAL", "0.01"))
-
-# 位置データファイル
-ROBOT_DATA_DIR = PROJECT_ROOT / "data" / "robot"
-ROBOT_DATA_DIR.mkdir(parents=True, exist_ok=True)
-ROBOT_POSITION_FILE = ROBOT_DATA_DIR / "positions.json"
-ROBOT_SEQUENCES_FILE = ROBOT_DATA_DIR / "sequences.json"
+# ソフトリミット (mm)
+ROBOT_SOFT_LIMIT_MIN_MM = float(os.getenv("ROBOT_SOFT_LIMIT_MIN_MM", "10.0"))
+ROBOT_SOFT_LIMIT_MAX_MM = [
+	float(os.getenv("ROBOT_SOFT_LIMIT_MAX_MM_X", "790.5")),
+	float(os.getenv("ROBOT_SOFT_LIMIT_MAX_MM_Y", "240.5")),
+	float(os.getenv("ROBOT_SOFT_LIMIT_MAX_MM_Z", "90.0")),
+]

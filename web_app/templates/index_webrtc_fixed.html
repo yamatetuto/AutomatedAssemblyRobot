@@ -176,6 +176,58 @@
             </div>
 
             <div class="panel">
+                <div class="panel-header" onclick="togglePanel('robot')">
+                    <h2>🧭 SPLEBO-N 制御</h2>
+                    <span class="toggle-icon collapsed" id="robot-toggle">▼</span>
+                </div>
+                <div class="panel-body collapsed" id="robot-body">
+                    <div class="button-row" style="margin-bottom: 10px;">
+                        <button class="success" onclick="robotHome()">🏠 原点復帰</button>
+                        <button class="danger" onclick="robotStopAll()">⛔ 停止</button>
+                    </div>
+
+                    <div class="control-group">
+                        <label>JOG速度 (mm/s):</label>
+                        <input type="number" id="robotJogSpeed" step="0.1" value="10">
+                    </div>
+                    <div class="control-group">
+                        <label>JOG軸:</label>
+                        <select id="robotJogAxis">
+                            <option value="0">X</option>
+                            <option value="1">Y</option>
+                            <option value="2">Z</option>
+                        </select>
+                    </div>
+                    <div class="button-row" style="margin-bottom: 10px;">
+                        <button id="robotJogNegative" class="secondary">◀ JOG -</button>
+                        <button id="robotJogPositive" class="secondary">JOG + ▶</button>
+                    </div>
+
+                    <div class="control-group">
+                        <label>ポイント番号:</label>
+                        <input type="number" id="robotPointNo" min="0" value="1">
+                    </div>
+                    <div class="control-group">
+                        <label>コメント:</label>
+                        <input type="text" id="robotPointComment" placeholder="comment">
+                    </div>
+                    <button onclick="registerRobotPoint()" style="width: 100%; margin-bottom: 10px;">💾 現在位置を登録</button>
+
+                    <div class="control-group">
+                        <label>IO出力 (CAN):</label>
+                        <div class="button-row" style="margin-bottom: 5px;">
+                            <input type="number" id="robotIoBoard" min="0" max="15" value="1" style="width: 48%;">
+                            <input type="number" id="robotIoPort" min="0" max="31" value="0" style="width: 48%;">
+                        </div>
+                        <div class="button-row">
+                            <button class="success" onclick="robotIoOutput(true)">ON</button>
+                            <button class="secondary" onclick="robotIoOutput(false)">OFF</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="panel">
                 <div class="panel-header" onclick="togglePanel('postable')">
                     <h2>📋 ポジションテーブル</h2>
                     <span class="toggle-icon collapsed" id="postable-toggle">▼</span>
