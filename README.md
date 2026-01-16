@@ -237,6 +237,19 @@ python app.py
   - **🆕 把持状態判定**: 成功/失敗/警告/移動中の自動判定
 - **📊 ステータス表示**: 右上に現在位置とサーボ状態を常時表示
 
+### ロボットデーモン + app.py 同時起動
+
+robot_daemon と app.py を同時に起動するスクリプトを追加しました。
+
+```bash
+cd ~/AutomatedAssemblyRobot
+scripts/start_robot_app.sh
+```
+
+ログ出力:
+- logs/robot_daemon.log
+- logs/app.log
+
 ### バックグラウンド起動
 
 サーバーをバックグラウンドで実行:
