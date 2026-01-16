@@ -4,7 +4,7 @@ OpenCV + V4L2 カメラ制御モジュール
 
 ## 概要
 
-このモジュールは、USB Webカメラ（Logitech C922 Pro等）をOpenCV + V4L2バックエンドで制御し、WebRTCストリーミング用のフレームを提供します。
+このモジュールは、USB Webカメラ（Logitech C922 Pro等）をOpenCV + V4L2バックエンドで制御し、WebRTCストリーミング用のフレームを提供します。camera_app.py と連携することで、カメラを別Raspberry Piに分離する運用も可能です。
 
 ### 主な機能
 
@@ -73,6 +73,13 @@ await camera.set_resolution(1280, 720)
 # コーデック変更 (MJPEG推奨)
 await camera.set_fourcc("MJPG")
 ```
+
+## リモートカメラ運用
+
+- camera_app.py をカメラ側Piで起動
+- app.py 側では `CAMERA_REMOTE_BASE_URL` を指定
+
+UI上では「📹 ローカルカメラ使用中」「📡 カメラPi: 接続中/未接続」で状態を表示します。
 
 ## 画像データ仕様
 
@@ -159,6 +166,7 @@ CAMERA_WIDTH = int(os.getenv('CAMERA_WIDTH', '640'))      # 幅
 CAMERA_HEIGHT = int(os.getenv('CAMERA_HEIGHT', '480'))    # 高さ
 CAMERA_FPS = int(os.getenv('CAMERA_FPS', '30'))           # フレームレート
 CAMERA_FOURCC = os.getenv('CAMERA_FOURCC', 'MJPG')        # コーデック
+CAMERA_REMOTE_BASE_URL = os.getenv('CAMERA_REMOTE_BASE_URL', '').rstrip('/')
 ```
 
 ## トラブルシューティング

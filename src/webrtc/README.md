@@ -4,7 +4,7 @@
 
 ## 概要
 
-このモジュールは、CameraManagerからのフレームをWebRTC経由でブラウザにリアルタイムストリーミングする機能を提供します。aiortcライブラリを使用したPython実装です。
+このモジュールは、CameraManagerからのフレームをWebRTC経由でブラウザにリアルタイムストリーミングする機能を提供します。aiortcライブラリを使用したPython実装です。camera_app.py 側でも同じ仕組みを使用します。
 
 ### 主な機能
 
@@ -162,6 +162,7 @@ WebRTCManagerは接続状態の変化を自動的に監視します:
 - STUNサーバーにはGoogleの公開サーバー (`stun:stun.l.google.com:19302`) を使用
 - ローカルネットワーク内では直接P2P接続が確立される
 - NATを超える場合はTURNサーバーの設定が必要な場合がある
+ - リモートカメラ運用時は app.py から camera_app.py にプロキシされる
 ビデオストリームトラックを初期化します。
 
 ##### `async recv() -> av.VideoFrame`

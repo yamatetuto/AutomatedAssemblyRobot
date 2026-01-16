@@ -49,11 +49,19 @@ python app.py
 
 3) UI で動作
 - 画面の「🧭 SPLEBO-N 制御」パネルを開く
-- 現在位置が 1 秒ごとに更新される（必要なら「🔄 現在位置取得」）
+- 現在位置が 1 秒ごとに更新される
 - 「🏠 原点復帰」/「JOG」/「💾 現在位置を登録」/「🎯 ポイントへ移動」/「⛔ 停止」を使用
 
 4) 停止
 - robot_daemon と app.py を Ctrl+C で停止（ロボットはクローズ処理される）
+
+---
+
+## 6. スクリプトでの起動/停止
+- 起動: `scripts/start_robot_app.sh`
+- 停止: `scripts/stop_robot_app.sh`
+
+起動時は sudo 認証が必要です（robot_daemon 起動のため）。
 
 ---
 

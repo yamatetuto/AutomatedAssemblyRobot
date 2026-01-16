@@ -1,6 +1,6 @@
 # 🤖 AutomatedAssemblyRobot
 
-積層型3Dプリンター、ディスペンサー、XYZ直交ロボットを組み合わせた医療機器の自動組立システム
+3Dプリンター・XYZ直交ロボット（SPLEBO-N）・電動グリッパー・カメラを統合制御する自動組立システム。ロボット制御はroot専用デーモンで分離し、UIはFastAPI + WebRTCで提供します。
 
 ---
 
@@ -9,10 +9,10 @@
 本プロジェクトは、以下のデバイスを統合制御し、医療機器の自動組立を実現するシステムです:
 
 - **3Dプリンター** (Tronxy GEMINI S) - OctoPrint経由で制御
-- **XYZ直交ロボット** (株式会社コスモスウェブ製 SPLEBO-N) - libcsms_splebo_n.so経由で制御
+- **XYZ直交ロボット** (株式会社コスモスウェブ製 SPLEBO-N) - TEACHINGライブラリ（libcsms_splebo_n.so）経由で制御
 - **電動グリッパー** (IAI社 RCP2-GRSS) - Modbus RTU通信
 - **ディスペンサー** - Raspberry Pi GPIO制御
-- **カメラ** (Logitech C922 Pro) - OpenCV + WebRTC
+- **カメラ** (Logitech C922 Pro) - OpenCV + WebRTC（ローカル/リモート分離対応）
 
 ---
 
@@ -48,71 +48,27 @@
 
 ```
 AutomatedAssemblyRobot/
-├── app.py                     # 統合アプリケーション（メイン）
-├── src/                       # モジュール化されたソースコード
-│   ├── camera/               # カメラ管理モジュール
-│   │   ├── __init__.py
-│   │   ├── camera_manager.py # OpenCV + V4L2カメラ制御
-│   │   └── README.md
-│   ├── gripper/              # グリッパー管理モジュール
-│   │   ├── __init__.py
-│   │   ├── gripper_manager.py  # 高レベルAPI（排他制御、キャッシュ）
-│   │   ├── controller.py       # CONController (Modbus RTU通信)
-│   │   └── README.md
-│   ├── robot/                # SPLEBO-N XYZ直交ロボット制御
-│   │   ├── __init__.py
-│   │   ├── robot_manager.py    # 統合管理クラス
-│   │   ├── motion_controller.py # モーション制御
-│   │   ├── can_controller.py   # CAN通信 (MCP2515)
-│   │   ├── io_expander.py      # I/O制御
-│   │   ├── position_manager.py # ティーチングポジション管理
-│   │   ├── sequence_manager.py # シーケンス実行
-│   │   ├── api.py              # REST APIエンドポイント
-│   │   ├── websocket_handler.py # WebSocket状態配信
-│   │   ├── constants.py        # 定数・Enum定義
-│   │   └── README.md
-│   ├── webrtc/               # WebRTC管理モジュール
-│   │   ├── __init__.py
-│   │   ├── webrtc_manager.py   # aiortc WebRTC接続管理
-│   │   └── README.md
-│   ├── printer/              # 3Dプリンター管理モジュール
-│   │   ├── __init__.py
-│   │   ├── octoprint_client.py # OctoPrint REST APIクライアント
-│   │   ├── printer_manager.py  # 高レベルプリンター制御
-│   │   └── README.md
-│   ├── vision/               # 画像処理モジュール
-│   │   ├── __init__.py
-│   │   ├── manager.py          # VisionManager（検出統括）
-│   │   └── detectors/          # 検出器
-│   │       ├── __init__.py
-│   │       ├── base.py         # BaseDetector（抽象基底クラス）
-│   │       ├── fiber.py        # FiberDetector（光ファイバー検出）
-│   │       └── bead.py         # BeadDetector（ガラス玉検出）
-│   └── config/               # 設定管理モジュール
-│       ├── __init__.py
-│       └── settings.py         # 環境変数読み込み
-├── data/                      # データファイル
-│   └── robot/                 # ロボット設定・ポジションデータ
-│       ├── config.json        # 軸設定
-│       ├── positions.json     # ティーチングポイント
-│       └── sequences.json     # シーケンス定義
-├── web_app/                   # Webアプリケーション
-│   ├── main_webrtc_fixed.py  # 旧メインファイル（参考用）
-│   ├── static/               # 静的ファイル
-│   │   ├── css/             
-│   │   │   └── style.css    # メインCSS
-│   │   └── js/              
-│   │       └── app.js       # UIロジック（電流値グラフ、把持判定等）
-│   └── templates/            # HTMLテンプレート
-│       └── index_webrtc_fixed.html
-├── scripts/                   # 運用スクリプト
-│   ├── start_all.sh          # 全サービス起動（旧マイクロサービス用）
-│   ├── stop_all.sh           # 全サービス停止
-│   └── health_check.sh       # ヘルスチェック
-├── snapshots/                 # スナップショット保存先
-├── requirements.txt           # Python依存パッケージ
-├── setup.py                   # パッケージ設定
-└── README.md                  # このファイル
+├── app.py                      # UI + API（ユーザー起動）
+├── robot_daemon.py             # ロボット制御専用（root起動）
+├── camera_app.py               # カメラ専用サーバー（別Pi用）
+├── src/
+│   ├── camera/                 # カメラ管理
+│   ├── gripper/                # グリッパー管理
+│   ├── printer/                # 3Dプリンター管理
+│   ├── robot/                  # TEACHINGラッパー
+│   │   ├── teaching_manager.py
+│   │   └── TEACHING/
+│   ├── vision/                 # 画像処理
+│   └── webrtc/                 # WebRTC管理
+├── scripts/
+│   ├── start_robot_app.sh      # robot_daemon + app.py 同時起動
+│   └── stop_robot_app.sh       # 停止
+├── web_app/
+│   ├── static/
+│   └── templates/
+├── snapshots/
+├── requirements.txt
+└── README.md
 ```
 
 ---
@@ -241,10 +197,10 @@ python app.py
 
 robot_daemon と app.py を同時に起動するスクリプトを追加しました。
 
-```bash
-cd ~/AutomatedAssemblyRobot
-scripts/start_robot_app.sh
-```
+- 起動: scripts/start_robot_app.sh
+- 停止: scripts/stop_robot_app.sh
+
+起動時に sudo 認証が必要です（robot_daemon 起動のため）。
 
 ログ出力:
 - logs/robot_daemon.log
@@ -271,6 +227,8 @@ pkill -f "python.*app.py"
 ---
 
 ## 📡 API仕様
+
+APIは更新中のため、最新のエンドポイントは app.py / robot_daemon.py を参照してください。
 
 ### カメラAPI
 
