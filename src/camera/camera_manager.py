@@ -6,14 +6,16 @@ import cv2
 import asyncio
 import re
 import subprocess
+import time
 from typing import Optional, Dict, List
 from datetime import datetime
 from pathlib import Path
 import logging
 
 from src.config.settings import (
-    CAMERA_DEVICE, CAMERA_WIDTH, CAMERA_HEIGHT, 
-    CAMERA_FPS, CAMERA_FOURCC, SNAPSHOTS_DIR
+    CAMERA_DEVICE, CAMERA_WIDTH, CAMERA_HEIGHT,
+    CAMERA_FPS, CAMERA_FOURCC, SNAPSHOTS_DIR,
+    CAMERA_READ_FAIL_MAX, CAMERA_RECONNECT_DELAY,
 )
 
 logger = logging.getLogger(__name__)
@@ -65,7 +67,9 @@ class CameraManager:
     async def _capture_loop(self):
         """カメラキャプチャループ（内部メソッド）"""
         try:
+            consecutive_failures = 0
             while self.is_running:
+                loop_start = time.time()
                 # カメラが未接続または切断された場合、再接続を試行
                 if self.camera is None or not self.camera.isOpened():
                     logger.info(f"カメラ接続中: /dev/video{CAMERA_DEVICE}")
@@ -100,20 +104,30 @@ class CameraManager:
                         actual_h = int(self.camera.get(cv2.CAP_PROP_FRAME_HEIGHT))
                         actual_fps = self.camera.get(cv2.CAP_PROP_FPS)
                         logger.info(f"✅ カメラ接続成功: {actual_w}x{actual_h} @ {actual_fps}fps")
+                        consecutive_failures = 0
                     else:
                         logger.error(f"カメラを開けませんでした: /dev/video{CAMERA_DEVICE}")
-                        await asyncio.sleep(5)  # 5秒待ってリトライ
+                        await asyncio.sleep(CAMERA_RECONNECT_DELAY)
                         continue
                 
                 # フレーム取得
                 ret, frame = self.camera.read()
                 if ret:
                     self.current_frame = frame
+                    consecutive_failures = 0
                 else:
+                    consecutive_failures += 1
                     logger.warning("フレーム取得失敗")
-                    self.camera = None  # 再接続を促す
-                
-                await asyncio.sleep(1 / self.settings["fps"])
+                    if consecutive_failures >= CAMERA_READ_FAIL_MAX:
+                        logger.warning("連続失敗のためカメラを再接続します")
+                        self.camera.release()
+                        self.camera = None
+                        await asyncio.sleep(CAMERA_RECONNECT_DELAY)
+                        continue
+
+                elapsed = time.time() - loop_start
+                sleep_time = max(0.0, (1 / self.settings["fps"]) - elapsed)
+                await asyncio.sleep(sleep_time)
         
         except asyncio.CancelledError:
             logger.info("カメラキャプチャループが停止されました")

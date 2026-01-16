@@ -5,11 +5,13 @@ src/モジュールを使用したWebアプリケーション
 import asyncio
 import logging
 import signal
+import time
 from pathlib import Path
 from typing import Optional
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException, Request
+import aiohttp
+from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import HTMLResponse, FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -28,6 +30,9 @@ from src.config.settings import (
     OCTOPRINT_URL,
     OCTOPRINT_API_KEY,
     OCTOPRINT_POLL_INTERVAL,
+    CAMERA_REMOTE_BASE_URL,
+    CAMERA_REMOTE_TIMEOUT,
+    CAMERA_REMOTE_HEALTH_TTL,
     ROBOT_TEACHING_DIR,
     ROBOT_POSITION_FILE,
     ROBOT_JOG_MIN_SPEED_MM_S,
@@ -56,16 +61,74 @@ webrtc_manager: Optional[WebRTCManager] = None
 printer_manager: Optional[PrinterManager] = None
 vision_manager: Optional[VisionManager] = None
 robot_manager: Optional[TeachingRobotManager] = None
+_services_started = False
+_camera_remote_cache = {"ok": False, "ts": 0.0}
+
+
+async def _check_remote_camera() -> bool:
+    if not CAMERA_REMOTE_BASE_URL:
+        return False
+    now = time.time()
+    if now - _camera_remote_cache["ts"] < CAMERA_REMOTE_HEALTH_TTL:
+        return _camera_remote_cache["ok"]
+
+    ok = False
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(
+                f"{CAMERA_REMOTE_BASE_URL}/api/camera/status",
+                timeout=CAMERA_REMOTE_TIMEOUT,
+            ) as resp:
+                ok = resp.status == 200
+    except Exception:
+        ok = False
+
+    _camera_remote_cache["ok"] = ok
+    _camera_remote_cache["ts"] = now
+    return ok
+
+
+async def _proxy_request(request: Request, target_path: str) -> Optional[Response]:
+    if not CAMERA_REMOTE_BASE_URL:
+        return None
+
+    url = f"{CAMERA_REMOTE_BASE_URL}{target_path}"
+    headers = {
+        key: value
+        for key, value in request.headers.items()
+        if key.lower() not in {"host", "content-length"}
+    }
+    body = await request.body()
+    params = request.query_params
+
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.request(
+                request.method,
+                url,
+                params=params,
+                data=body,
+                headers=headers,
+                timeout=CAMERA_REMOTE_TIMEOUT,
+            ) as resp:
+                content = await resp.read()
+                media_type = resp.headers.get("Content-Type")
+                return Response(content=content, status_code=resp.status, media_type=media_type)
+    except Exception as e:
+        logger.warning(f"リモートカメラへのプロキシ失敗: {e}")
+        return None
 
 
 # Lifespan context manager
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    """アプリケーションのライフサイクル管理"""
-    global camera_manager, gripper_manager, webrtc_manager, printer_manager, vision_manager, robot_manager
-    
+async def _startup_services() -> None:
+    global camera_manager, gripper_manager, webrtc_manager, printer_manager, vision_manager, robot_manager, _services_started
+
+    if _services_started:
+        return
+    _services_started = True
+
     logger.info("🚀 アプリケーションを起動中...")
-    
+
     # カメラ初期化
     try:
         camera_manager = CameraManager()
@@ -74,7 +137,7 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error(f"❌ カメラサービス起動失敗: {e}")
         camera_manager = None
-    
+
     # グリッパー初期化
     try:
         gripper_manager = GripperManager()
@@ -83,7 +146,7 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error(f"❌ グリッパーサービス起動失敗: {e}")
         gripper_manager = None
-    
+
     # WebRTC初期化
     try:
         webrtc_manager = WebRTCManager(camera_manager)
@@ -91,7 +154,7 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error(f"❌ WebRTCサービス起動失敗: {e}")
         webrtc_manager = None
-    
+
     # 画像処理初期化
     try:
         vision_manager = VisionManager()
@@ -139,22 +202,25 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error(f"❌ ロボットサービス起動失敗: {e}")
         robot_manager = None
-    
+
     logger.info("🎉 すべてのサービスが起動しました")
-    
-    # アプリ起動後、ここで処理を一時停止
-    # 終了処理が入力されたら再開
-    yield
-    
-    # シャットダウン処理
+
+
+async def _shutdown_services() -> None:
+    global camera_manager, gripper_manager, webrtc_manager, printer_manager, vision_manager, robot_manager, _services_started
+
+    if not _services_started:
+        return
+    _services_started = False
+
     logger.info("🛑 アプリケーションを終了中...")
-    
+
     if webrtc_manager:
         await webrtc_manager.close_all()
-    
+
     if camera_manager:
         await camera_manager.stop()
-    
+
     if gripper_manager:
         await gripper_manager.disconnect()
 
@@ -163,12 +229,30 @@ async def lifespan(app: FastAPI):
 
     if robot_manager:
         await asyncio.to_thread(robot_manager.close)
-    
+
     logger.info("👋 すべてのサービスを停止しました")
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """アプリケーションのライフサイクル管理"""
+    await _startup_services()
+    yield
+    await _shutdown_services()
 
 
 # FastAPIアプリ
 app = FastAPI(title="自動組み立てロボット制御システム", lifespan=lifespan)
+
+
+@app.on_event("startup")
+async def on_startup() -> None:
+    await _startup_services()
+
+
+@app.on_event("shutdown")
+async def on_shutdown() -> None:
+    await _shutdown_services()
 
 # 静的ファイルとテンプレート
 app.mount("/static", StaticFiles(directory="web_app/static"), name="static")
@@ -232,8 +316,12 @@ async def health_check():
 
 # カメラAPI
 @app.get("/api/camera/status")
-async def get_camera_status():
+async def get_camera_status(request: Request):
     """カメラ状態取得"""
+    if await _check_remote_camera():
+        proxied = await _proxy_request(request, "/api/camera/status")
+        if proxied:
+            return proxied
     if not camera_manager:
         raise HTTPException(status_code=503, detail="カメラが起動していません")
     
@@ -257,8 +345,12 @@ async def get_camera_status():
 
 
 @app.get("/api/camera/resolutions")
-async def get_camera_resolutions():
+async def get_camera_resolutions(request: Request):
     """カメラ対応解像度一覧"""
+    if await _check_remote_camera():
+        proxied = await _proxy_request(request, "/api/camera/resolutions")
+        if proxied:
+            return proxied
     common_resolutions = [
         {"width": 320, "height": 240, "label": "QVGA (320x240)"},
         {"width": 640, "height": 480, "label": "VGA (640x480)"},
@@ -275,8 +367,12 @@ async def get_camera_resolutions():
 
 
 @app.get("/api/camera/controls")
-async def get_camera_controls():
+async def get_camera_controls(request: Request):
     """カメラコントロール一覧取得"""
+    if await _check_remote_camera():
+        proxied = await _proxy_request(request, "/api/camera/controls")
+        if proxied:
+            return proxied
     if not camera_manager or not camera_manager.is_opened():
         raise HTTPException(status_code=503, detail="カメラが接続されていません")
     
@@ -289,8 +385,12 @@ async def get_camera_controls():
 
 
 @app.post("/api/camera/control/{name}/{value}")
-async def set_camera_control(name: str, value: int):
+async def set_camera_control(name: str, value: int, request: Request):
     """カメラコントロール設定"""
+    if await _check_remote_camera():
+        proxied = await _proxy_request(request, f"/api/camera/control/{name}/{value}")
+        if proxied:
+            return proxied
     if not camera_manager or not camera_manager.is_opened():
         raise HTTPException(status_code=503, detail="カメラが接続されていません")
     
@@ -303,8 +403,12 @@ async def set_camera_control(name: str, value: int):
 
 
 @app.post("/api/camera/control/reset/{name}")
-async def reset_camera_control(name: str):
+async def reset_camera_control(name: str, request: Request):
     """カメラコントロールをデフォルト値にリセット"""
+    if await _check_remote_camera():
+        proxied = await _proxy_request(request, f"/api/camera/control/reset/{name}")
+        if proxied:
+            return proxied
     if not camera_manager or not camera_manager.is_opened():
         raise HTTPException(status_code=503, detail="カメラが接続されていません")
     
@@ -317,8 +421,12 @@ async def reset_camera_control(name: str):
 
 
 @app.post("/api/camera/controls/reset_all")
-async def reset_all_camera_controls():
+async def reset_all_camera_controls(request: Request):
     """すべてのカメラコントロールをデフォルト値にリセット"""
+    if await _check_remote_camera():
+        proxied = await _proxy_request(request, "/api/camera/controls/reset_all")
+        if proxied:
+            return proxied
     if not camera_manager or not camera_manager.is_opened():
         raise HTTPException(status_code=503, detail="カメラが接続されていません")
     
@@ -337,8 +445,12 @@ async def reset_all_camera_controls():
 
 
 @app.post("/api/camera/snapshot")
-async def take_snapshot():
+async def take_snapshot(request: Request):
     """スナップショット撮影"""
+    if await _check_remote_camera():
+        proxied = await _proxy_request(request, "/api/camera/snapshot")
+        if proxied:
+            return proxied
     if not camera_manager:
         raise HTTPException(status_code=503, detail="カメラが起動していません")
     
@@ -350,8 +462,12 @@ async def take_snapshot():
 
 
 @app.get("/api/camera/snapshots/{filename}")
-async def get_snapshot(filename: str):
+async def get_snapshot(filename: str, request: Request):
     """スナップショット取得"""
+    if await _check_remote_camera():
+        proxied = await _proxy_request(request, f"/api/camera/snapshots/{filename}")
+        if proxied:
+            return proxied
     filepath = SNAPSHOTS_DIR / filename
     if not filepath.exists():
         raise HTTPException(status_code=404, detail="ファイルが見つかりません")
@@ -360,10 +476,13 @@ async def get_snapshot(filename: str):
 
 
 @app.get("/api/camera/snapshots")
-async def list_snapshots():
+async def list_snapshots(request: Request):
     """スナップショット一覧取得"""
     import os
-    
+    if await _check_remote_camera():
+        proxied = await _proxy_request(request, "/api/camera/snapshots")
+        if proxied:
+            return proxied
     if not SNAPSHOTS_DIR.exists():
         return {"status": "ok", "snapshots": []}
     
@@ -381,8 +500,12 @@ async def list_snapshots():
 
 # WebRTC API
 @app.post("/api/webrtc/offer")
-async def webrtc_offer(offer: WebRTCOffer):
+async def webrtc_offer(request: Request, offer: WebRTCOffer):
     """WebRTC Offer処理"""
+    if await _check_remote_camera():
+        proxied = await _proxy_request(request, "/api/webrtc/offer")
+        if proxied:
+            return proxied
     if not webrtc_manager:
         raise HTTPException(status_code=503, detail="WebRTCサービスが起動していません")
     
@@ -395,15 +518,20 @@ async def webrtc_offer(offer: WebRTCOffer):
 
 
 @app.post("/api/camera/resolution")
-async def set_camera_resolution(request: dict):
+async def set_camera_resolution(request: Request):
     """カメラ解像度変更"""
+    if await _check_remote_camera():
+        proxied = await _proxy_request(request, "/api/camera/resolution")
+        if proxied:
+            return proxied
     if not camera_manager:
         raise HTTPException(status_code=503, detail="カメラが起動していません")
     
     try:
-        width = request.get("width")
-        height = request.get("height")
-        fps = request.get("fps", camera_manager.settings.get("fps", 30))
+        data = await request.json()
+        width = data.get("width")
+        height = data.get("height")
+        fps = data.get("fps", camera_manager.settings.get("fps", 30))
         
         if width and height:
             # update_settings()が内部でstop/startを実行
@@ -423,6 +551,10 @@ async def set_camera_resolution(request: dict):
 @app.post("/api/camera/codec")
 async def change_codec(request: Request):
     """カメラコーデック変更"""
+    if await _check_remote_camera():
+        proxied = await _proxy_request(request, "/api/camera/codec")
+        if proxied:
+            return proxied
     try:
         data = await request.json()
         codec = data.get("codec", "MJPG")
@@ -764,8 +896,12 @@ async def gripper_grip_status(target_position: int = None):
 
 # 画像処理API
 @app.post("/api/vision/detect/fiber")
-async def detect_fiber():
+async def detect_fiber(request: Request):
     """ファイバー検出を実行"""
+    if await _check_remote_camera():
+        proxied = await _proxy_request(request, "/api/vision/detect/fiber")
+        if proxied:
+            return proxied
     if not camera_manager or not vision_manager:
         raise HTTPException(status_code=503, detail="サービスが利用できません")
     
@@ -781,8 +917,12 @@ async def detect_fiber():
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/vision/detect/bead")
-async def detect_bead():
+async def detect_bead(request: Request):
     """ビーズ検出を実行"""
+    if await _check_remote_camera():
+        proxied = await _proxy_request(request, "/api/vision/detect/bead")
+        if proxied:
+            return proxied
     if not camera_manager or not vision_manager:
         raise HTTPException(status_code=503, detail="サービスが利用できません")
     

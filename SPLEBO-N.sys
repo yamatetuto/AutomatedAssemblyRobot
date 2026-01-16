@@ -1,0 +1,21 @@
+[Project]
+DataType=SPLEBO-N.SYS
+Version=1.00
+TimeStamp=2026/01/16 13:33:42
+
+[SysParam]
+MaxSpeed=800,800,225,1200,10,10,8000,8000
+MaxAccel=2940,2940,1960,40000,100,100,50000,50000
+MaxDecel=2940,2940,1960,40000,100,100,50000,50000
+StartSpeed=200,200,50,50,10,10,500,500
+OffsetSpeed=10,10,10,50,10,10,10,10
+OriginSpeed=10,10,10,50,10,10,10,10
+OriginOffset=0,0,0,0,0,0,0,0
+LimitPlus=300.5,300.5,100.5,0,0,0,0,0
+LimitMinus=-0.5,-0.5,-0.5,0,0,0,0,0
+PulseLength=0.01,0.01,0.01,0.01,0.01,0.01,0.01,0.01
+OriginOrder=2,2,1,1,1,1,1,1
+OriginDir=0,0,0,0,0,0,0,0
+OriginSensor=0,0,0,0,0,0,0,0
+InPosition=1,1,1,1,0,0,0,0
+MotorType=1,1,1,0,0,0,0,0

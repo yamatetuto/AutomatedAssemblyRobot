@@ -20,6 +20,8 @@
 
 # WebRTC (カメラストリーミング)
 aiortc>=1.6.0
+# HTTPクライアント（カメラPiプロキシ）
+aiohttp>=3.8.0
 # Python3.9.x
 # aiortc>=1.5.0
 

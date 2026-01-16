@@ -14,6 +14,13 @@ CAMERA_WIDTH = int(os.getenv('CAMERA_WIDTH', '640'))
 CAMERA_HEIGHT = int(os.getenv('CAMERA_HEIGHT', '480'))
 CAMERA_FPS = int(os.getenv('CAMERA_FPS', '30'))
 CAMERA_FOURCC = os.getenv('CAMERA_FOURCC', 'MJPG')
+CAMERA_READ_FAIL_MAX = int(os.getenv('CAMERA_READ_FAIL_MAX', '5'))
+CAMERA_RECONNECT_DELAY = float(os.getenv('CAMERA_RECONNECT_DELAY', '2.0'))
+
+# リモートカメラ（カメラPi）設定
+CAMERA_REMOTE_BASE_URL = os.getenv('CAMERA_REMOTE_BASE_URL', '').rstrip('/')
+CAMERA_REMOTE_TIMEOUT = float(os.getenv('CAMERA_REMOTE_TIMEOUT', '5.0'))
+CAMERA_REMOTE_HEALTH_TTL = float(os.getenv('CAMERA_REMOTE_HEALTH_TTL', '2.0'))
 
 # グリッパー設定
 GRIPPER_PORT = os.getenv('GRIPPER_PORT', '/dev/gripper')
