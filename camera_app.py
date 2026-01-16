@@ -2,6 +2,8 @@
 import asyncio
 import logging
 import signal
+import base64
+from datetime import datetime
 from contextlib import asynccontextmanager
 from typing import Optional
 
@@ -24,6 +26,27 @@ camera_manager: Optional[CameraManager] = None
 webrtc_manager: Optional[WebRTCManager] = None
 vision_manager: Optional[VisionManager] = None
 _services_started = False
+
+
+def _save_detection_snapshot(image_base64: str, prefix: str) -> Optional[dict]:
+    if not image_base64:
+        return None
+    try:
+        SNAPSHOTS_DIR.mkdir(parents=True, exist_ok=True)
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"{prefix}_{ts}.jpg"
+        filepath = SNAPSHOTS_DIR / filename
+        data = base64.b64decode(image_base64)
+        with open(filepath, "wb") as f:
+            f.write(data)
+        return {
+            "filename": filename,
+            "timestamp": ts,
+            "path": str(filepath),
+        }
+    except Exception as e:
+        logger.warning(f"検出結果スナップショット保存失敗: {e}")
+        return None
 
 
 class WebRTCOffer(BaseModel):
@@ -282,7 +305,11 @@ async def detect_fiber():
     if frame is None:
         raise HTTPException(status_code=500, detail="画像の取得に失敗しました")
 
-    return vision_manager.detect_fiber(frame)
+    result = vision_manager.detect_fiber(frame)
+    snapshot = _save_detection_snapshot(result.get("image_base64", ""), "fiber")
+    if snapshot:
+        result["snapshot"] = snapshot
+    return result
 
 
 @app.post("/api/vision/detect/bead")
@@ -294,7 +321,11 @@ async def detect_bead():
     if frame is None:
         raise HTTPException(status_code=500, detail="画像の取得に失敗しました")
 
-    return vision_manager.detect_bead(frame)
+    result = vision_manager.detect_bead(frame)
+    snapshot = _save_detection_snapshot(result.get("image_base64", ""), "bead")
+    if snapshot:
+        result["snapshot"] = snapshot
+    return result
 
 
 # シグナルハンドラー

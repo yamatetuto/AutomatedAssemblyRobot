@@ -45,6 +45,29 @@ function updateConnectionStatus(status) {
     statusDiv.textContent = messages[status] || status;
 }
 
+function updateCameraRemoteStatus(connected, enabled) {
+    const statusDiv = document.getElementById('cameraRemoteStatus');
+    if (!statusDiv) return;
+    if (!enabled) {
+        statusDiv.className = 'status connected';
+        statusDiv.textContent = '📡 カメラPi: 無効 (ローカル)';
+        return;
+    }
+    statusDiv.className = 'status ' + (connected ? 'connected' : 'disconnected');
+    statusDiv.textContent = connected ? '📡 カメラPi: 接続中' : '📡 カメラPi: 未接続';
+}
+
+async function refreshCameraRemoteStatus() {
+    try {
+        const response = await fetch('/api/camera/remote_status');
+        if (!response.ok) return;
+        const data = await response.json();
+        updateCameraRemoteStatus(data.connected, data.enabled);
+    } catch (error) {
+        console.error('カメラPi状態取得エラー:', error);
+    }
+}
+
 async function setupWebRTC() {
     updateConnectionStatus('connecting');
     
@@ -477,6 +500,8 @@ window.onload = () => {
     startPrinterMonitor();
     setInterval(updateGripperStatus, 2000);
     setupRobotControls();
+    refreshCameraRemoteStatus();
+    setInterval(refreshCameraRemoteStatus, 5000);
 };
 
 async function setupRobotControls() {

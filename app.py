@@ -47,6 +47,9 @@ from src.printer.printer_manager import PrinterManager
 from src.vision.manager import VisionManager
 from src.robot.teaching_manager import TeachingRobotManager
 
+import base64
+from datetime import datetime
+
 # ロギング設定
 logging.basicConfig(
     level=logging.INFO,
@@ -63,6 +66,27 @@ vision_manager: Optional[VisionManager] = None
 robot_manager: Optional[TeachingRobotManager] = None
 _services_started = False
 _camera_remote_cache = {"ok": False, "ts": 0.0}
+
+
+def _save_detection_snapshot(image_base64: str, prefix: str) -> Optional[dict]:
+    if not image_base64:
+        return None
+    try:
+        SNAPSHOTS_DIR.mkdir(parents=True, exist_ok=True)
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"{prefix}_{ts}.jpg"
+        filepath = SNAPSHOTS_DIR / filename
+        data = base64.b64decode(image_base64)
+        with open(filepath, "wb") as f:
+            f.write(data)
+        return {
+            "filename": filename,
+            "timestamp": ts,
+            "path": str(filepath),
+        }
+    except Exception as e:
+        logger.warning(f"検出結果スナップショット保存失敗: {e}")
+        return None
 
 
 async def _check_remote_camera() -> bool:
@@ -129,13 +153,22 @@ async def _startup_services() -> None:
 
     logger.info("🚀 アプリケーションを起動中...")
 
+    remote_camera_ok = False
+    if CAMERA_REMOTE_BASE_URL:
+        remote_camera_ok = await _check_remote_camera()
+        if remote_camera_ok:
+            logger.info("📡 リモートカメラ接続を使用します（ローカルカメラは起動しません）")
+
     # カメラ初期化
-    try:
-        camera_manager = CameraManager()
-        await camera_manager.start()
-        logger.info("✅ カメラサービス起動")
-    except Exception as e:
-        logger.error(f"❌ カメラサービス起動失敗: {e}")
+    if not remote_camera_ok:
+        try:
+            camera_manager = CameraManager()
+            await camera_manager.start()
+            logger.info("✅ カメラサービス起動")
+        except Exception as e:
+            logger.error(f"❌ カメラサービス起動失敗: {e}")
+            camera_manager = None
+    else:
         camera_manager = None
 
     # グリッパー初期化
@@ -147,20 +180,23 @@ async def _startup_services() -> None:
         logger.error(f"❌ グリッパーサービス起動失敗: {e}")
         gripper_manager = None
 
-    # WebRTC初期化
-    try:
-        webrtc_manager = WebRTCManager(camera_manager)
-        logger.info("✅ WebRTCサービス起動")
-    except Exception as e:
-        logger.error(f"❌ WebRTCサービス起動失敗: {e}")
-        webrtc_manager = None
+    # WebRTC/画像処理初期化（ローカルカメラ使用時のみ）
+    if not remote_camera_ok:
+        try:
+            webrtc_manager = WebRTCManager(camera_manager)
+            logger.info("✅ WebRTCサービス起動")
+        except Exception as e:
+            logger.error(f"❌ WebRTCサービス起動失敗: {e}")
+            webrtc_manager = None
 
-    # 画像処理初期化
-    try:
-        vision_manager = VisionManager()
-        logger.info("✅ 画像処理サービス起動")
-    except Exception as e:
-        logger.error(f"❌ 画像処理サービス起動失敗: {e}")
+        try:
+            vision_manager = VisionManager()
+            logger.info("✅ 画像処理サービス起動")
+        except Exception as e:
+            logger.error(f"❌ 画像処理サービス起動失敗: {e}")
+            vision_manager = None
+    else:
+        webrtc_manager = None
         vision_manager = None
 
     # 3Dプリンター初期化
@@ -311,6 +347,17 @@ async def health_check():
         "camera": camera_manager.is_opened() if camera_manager else False,
         "gripper": gripper_manager.is_connected if gripper_manager else False,
         "printer": printer_manager is not None
+    }
+
+
+@app.get("/api/camera/remote_status")
+async def camera_remote_status():
+    """カメラPi接続状態"""
+    connected = await _check_remote_camera()
+    return {
+        "enabled": bool(CAMERA_REMOTE_BASE_URL),
+        "connected": connected,
+        "base_url": CAMERA_REMOTE_BASE_URL or None,
     }
 
 
@@ -911,6 +958,9 @@ async def detect_fiber(request: Request):
     
     try:
         result = vision_manager.detect_fiber(frame)
+        snapshot = _save_detection_snapshot(result.get("image_base64", ""), "fiber")
+        if snapshot:
+            result["snapshot"] = snapshot
         return result
     except Exception as e:
         logger.error(f"ファイバー検出エラー: {e}")
@@ -932,6 +982,9 @@ async def detect_bead(request: Request):
     
     try:
         result = vision_manager.detect_bead(frame)
+        snapshot = _save_detection_snapshot(result.get("image_base64", ""), "bead")
+        if snapshot:
+            result["snapshot"] = snapshot
         return result
     except Exception as e:
         logger.error(f"ビーズ検出エラー: {e}")
