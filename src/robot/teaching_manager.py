@@ -52,8 +52,13 @@ class TeachingRobotManager:
             if self._robot is not None:
                 return
             self._load_teaching_modules()
-            self._robot = self._splebo.splebo_n_class()
-            self._mc = self._robot.motion_class
+            original_cwd = Path.cwd()
+            try:
+                os.chdir(self.teaching_dir)
+                self._robot = self._splebo.splebo_n_class()
+                self._mc = self._robot.motion_class
+            finally:
+                os.chdir(original_cwd)
 
     def close(self) -> None:
         with self._lock:
@@ -149,6 +154,16 @@ class TeachingRobotManager:
                 "comment": comment or "",
             }
 
+    def move_to_point(self, point_no: int, speed_rate: float) -> None:
+        with self._lock:
+            self._ensure_ready()
+            if point_no < 0:
+                raise ValueError("point_no must be >= 0")
+            speed_rate = float(speed_rate)
+            if speed_rate <= 0 or speed_rate > 100:
+                raise ValueError("speed_rate must be between 1 and 100")
+            self._robot.motion_movePoint(0x07, int(point_no), speed_rate)
+
     def io_output(self, board_id: int, port_no: int, on: bool) -> bool:
         with self._lock:
             self._ensure_ready()
@@ -162,6 +177,20 @@ class TeachingRobotManager:
             "soft_limit_min_mm": self.soft_limit_min_mm,
             "soft_limit_max_mm": self.soft_limit_max_mm,
         }
+
+    def get_emg_status(self) -> bool:
+        with self._lock:
+            self._ensure_ready()
+            return bool(self._robot.emg_getstat())
+
+    def get_positions(self) -> Dict[str, float]:
+        with self._lock:
+            self._ensure_ready()
+            return {
+                "x": float(self._robot.motion_getposition(0)),
+                "y": float(self._robot.motion_getposition(1)),
+                "z": float(self._robot.motion_getposition(2)),
+            }
 
     def _ensure_ready(self) -> None:
         if self._robot is None:
@@ -265,6 +294,14 @@ class TeachingRobotManager:
 
         if str(self.teaching_dir) not in sys.path:
             sys.path.insert(0, str(self.teaching_dir))
+
+        so_path = self.teaching_dir / "libcsms_splebo_n.so"
+        if not so_path.exists():
+            raise RuntimeError(f"Missing shared library: {so_path}")
+
+        ld_path = os.environ.get("LD_LIBRARY_PATH", "")
+        if str(self.teaching_dir) not in ld_path.split(":" ):
+            os.environ["LD_LIBRARY_PATH"] = f"{self.teaching_dir}:{ld_path}" if ld_path else str(self.teaching_dir)
 
         original_cwd = Path.cwd()
         try:

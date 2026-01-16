@@ -102,3 +102,8 @@ ROBOT_SOFT_LIMIT_MAX_MM = [
 	float(os.getenv("ROBOT_SOFT_LIMIT_MAX_MM_Y", "240.5")),
 	float(os.getenv("ROBOT_SOFT_LIMIT_MAX_MM_Z", "90.0")),
 ]
+
+# リモートロボット（rootサービス）設定
+ROBOT_REMOTE_BASE_URL = os.getenv("ROBOT_REMOTE_BASE_URL", "").rstrip('/')
+ROBOT_REMOTE_TIMEOUT = float(os.getenv("ROBOT_REMOTE_TIMEOUT", "5.0"))
+ROBOT_REMOTE_HEALTH_TTL = float(os.getenv("ROBOT_REMOTE_HEALTH_TTL", "2.0"))

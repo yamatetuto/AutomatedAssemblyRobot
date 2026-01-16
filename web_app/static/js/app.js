@@ -8,6 +8,7 @@ let printerStatusInterval = null;
 let printerStatusDisabled = false;
 let robotConfig = null;
 let activeJogAxis = null;
+let robotPositionInterval = null;
 
 function showToast(message, type = 'info') {
     const toast = document.getElementById('toast');
@@ -511,6 +512,11 @@ async function setupRobotControls() {
 
     window.addEventListener('mouseup', robotJogStop);
     window.addEventListener('touchend', robotJogStop);
+
+    await refreshRobotPosition();
+    if (!robotPositionInterval) {
+        robotPositionInterval = setInterval(refreshRobotPosition, 1000);
+    }
 }
 
 async function loadRobotConfig() {
@@ -623,6 +629,24 @@ async function robotJogStop() {
     }
 }
 
+async function refreshRobotPosition() {
+    try {
+        const response = await fetch('/api/robot/diagnostics');
+        if (!response.ok) return;
+        const data = await response.json();
+        if (!data || !data.positions) return;
+        const pos = data.positions;
+        const xEl = document.getElementById('robotPosX');
+        const yEl = document.getElementById('robotPosY');
+        const zEl = document.getElementById('robotPosZ');
+        if (xEl) xEl.textContent = pos.x.toFixed(2);
+        if (yEl) yEl.textContent = pos.y.toFixed(2);
+        if (zEl) zEl.textContent = pos.z.toFixed(2);
+    } catch (error) {
+        console.error('ロボット位置取得エラー:', error);
+    }
+}
+
 async function registerRobotPoint() {
     const pointNoInput = document.getElementById('robotPointNo');
     const commentInput = document.getElementById('robotPointComment');
@@ -640,6 +664,28 @@ async function registerRobotPoint() {
             throw new Error(payload.detail || 'ポイント登録に失敗しました');
         }
         showToast('ポイントを登録しました', 'success');
+    } catch (error) {
+        showToast(error.message, 'error');
+    }
+}
+
+async function moveRobotPoint() {
+    const pointNoInput = document.getElementById('robotPointNo');
+    const speedRateInput = document.getElementById('robotPointSpeedRate');
+    const pointNo = pointNoInput ? parseInt(pointNoInput.value, 10) : 0;
+    const speedRate = speedRateInput ? parseFloat(speedRateInput.value) : 30.0;
+
+    try {
+        const response = await fetch('/api/robot/point/move', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ point_no: pointNo, speed_rate: speedRate })
+        });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) {
+            throw new Error(payload.detail || 'ポイント移動に失敗しました');
+        }
+        showToast('ポイント移動を開始しました', 'success');
     } catch (error) {
         showToast(error.message, 'error');
     }

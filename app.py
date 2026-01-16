@@ -33,6 +33,9 @@ from src.config.settings import (
     CAMERA_REMOTE_BASE_URL,
     CAMERA_REMOTE_TIMEOUT,
     CAMERA_REMOTE_HEALTH_TTL,
+    ROBOT_REMOTE_BASE_URL,
+    ROBOT_REMOTE_TIMEOUT,
+    ROBOT_REMOTE_HEALTH_TTL,
     ROBOT_TEACHING_DIR,
     ROBOT_POSITION_FILE,
     ROBOT_JOG_MIN_SPEED_MM_S,
@@ -69,6 +72,8 @@ robot_manager: Optional[TeachingRobotManager] = None
 _services_started = False
 _camera_remote_cache = {"ok": False, "ts": 0.0}
 _camera_remote_monitor_task: Optional[asyncio.Task] = None
+_robot_remote_cache = {"ok": False, "ts": 0.0}
+_robot_remote_monitor_task: Optional[asyncio.Task] = None
 
 
 def _save_detection_snapshot(image_base64: str, prefix: str) -> Optional[dict]:
@@ -152,6 +157,29 @@ async def _check_remote_camera() -> bool:
     return ok
 
 
+async def _check_remote_robot() -> bool:
+    if not ROBOT_REMOTE_BASE_URL:
+        return False
+    now = time.time()
+    if now - _robot_remote_cache["ts"] < ROBOT_REMOTE_HEALTH_TTL:
+        return _robot_remote_cache["ok"]
+
+    ok = False
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(
+                f"{ROBOT_REMOTE_BASE_URL}/health",
+                timeout=ROBOT_REMOTE_TIMEOUT,
+            ) as resp:
+                ok = resp.status == 200
+    except Exception:
+        ok = False
+
+    _robot_remote_cache["ok"] = ok
+    _robot_remote_cache["ts"] = now
+    return ok
+
+
 async def _proxy_request(request: Request, target_path: str) -> Optional[Response]:
     if not CAMERA_REMOTE_BASE_URL:
         return None
@@ -183,10 +211,41 @@ async def _proxy_request(request: Request, target_path: str) -> Optional[Respons
         return None
 
 
+async def _proxy_robot_request(request: Request, target_path: str) -> Optional[Response]:
+    if not ROBOT_REMOTE_BASE_URL:
+        return None
+
+    url = f"{ROBOT_REMOTE_BASE_URL}{target_path}"
+    headers = {
+        key: value
+        for key, value in request.headers.items()
+        if key.lower() not in {"host", "content-length"}
+    }
+    body = await request.body()
+    params = request.query_params
+
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.request(
+                request.method,
+                url,
+                params=params,
+                data=body,
+                headers=headers,
+                timeout=ROBOT_REMOTE_TIMEOUT,
+            ) as resp:
+                content = await resp.read()
+                media_type = resp.headers.get("Content-Type")
+                return Response(content=content, status_code=resp.status, media_type=media_type)
+    except Exception as e:
+        logger.warning(f"リモートロボットへのプロキシ失敗: {e}")
+        return None
+
+
 # Lifespan context manager
 async def _startup_services() -> None:
     global camera_manager, gripper_manager, webrtc_manager, printer_manager, vision_manager, robot_manager, _services_started
-    global _camera_remote_monitor_task
+    global _camera_remote_monitor_task, _robot_remote_monitor_task
 
     if _services_started:
         return
@@ -199,6 +258,12 @@ async def _startup_services() -> None:
         remote_camera_ok = await _check_remote_camera()
         if remote_camera_ok:
             logger.info("📡 リモートカメラ接続を使用します（ローカルカメラは起動しません）")
+
+    remote_robot_ok = False
+    if ROBOT_REMOTE_BASE_URL:
+        remote_robot_ok = await _check_remote_robot()
+        if remote_robot_ok:
+            logger.info("🧭 リモートロボット接続を使用します（ローカルロボットは起動しません）")
 
     # カメラ初期化
     if not remote_camera_ok:
@@ -263,21 +328,24 @@ async def _startup_services() -> None:
         logger.info("ℹ️ OctoPrint設定が未定義のため3Dプリンターサービスをスキップします")
 
     # ロボット（TEACHING）初期化
-    try:
-        robot_manager = TeachingRobotManager(
-            teaching_dir=ROBOT_TEACHING_DIR,
-            position_file=ROBOT_POSITION_FILE,
-            soft_limit_min_mm=ROBOT_SOFT_LIMIT_MIN_MM,
-            soft_limit_max_mm=ROBOT_SOFT_LIMIT_MAX_MM,
-            jog_speed_min_mm_s=ROBOT_JOG_MIN_SPEED_MM_S,
-            jog_speed_max_mm_s=ROBOT_JOG_MAX_SPEED_MM_S,
-            jog_speed_default_mm_s=ROBOT_JOG_DEFAULT_SPEED_MM_S,
-            jog_poll_interval_s=ROBOT_JOG_POLL_INTERVAL,
-        )
-        await asyncio.to_thread(robot_manager.connect)
-        logger.info("✅ ロボットサービス起動")
-    except Exception as e:
-        logger.error(f"❌ ロボットサービス起動失敗: {e}")
+    if not remote_robot_ok:
+        try:
+            robot_manager = TeachingRobotManager(
+                teaching_dir=ROBOT_TEACHING_DIR,
+                position_file=ROBOT_POSITION_FILE,
+                soft_limit_min_mm=ROBOT_SOFT_LIMIT_MIN_MM,
+                soft_limit_max_mm=ROBOT_SOFT_LIMIT_MAX_MM,
+                jog_speed_min_mm_s=ROBOT_JOG_MIN_SPEED_MM_S,
+                jog_speed_max_mm_s=ROBOT_JOG_MAX_SPEED_MM_S,
+                jog_speed_default_mm_s=ROBOT_JOG_DEFAULT_SPEED_MM_S,
+                jog_poll_interval_s=ROBOT_JOG_POLL_INTERVAL,
+            )
+            await asyncio.to_thread(robot_manager.connect)
+            logger.info("✅ ロボットサービス起動")
+        except Exception as e:
+            logger.error(f"❌ ロボットサービス起動失敗: {e}")
+            robot_manager = None
+    else:
         robot_manager = None
 
     logger.info("🎉 すべてのサービスが起動しました")
@@ -285,10 +353,13 @@ async def _startup_services() -> None:
     if CAMERA_REMOTE_BASE_URL and _camera_remote_monitor_task is None:
         _camera_remote_monitor_task = asyncio.create_task(_monitor_remote_camera())
 
+    if ROBOT_REMOTE_BASE_URL and _robot_remote_monitor_task is None:
+        _robot_remote_monitor_task = asyncio.create_task(_monitor_remote_robot())
+
 
 async def _shutdown_services() -> None:
     global camera_manager, gripper_manager, webrtc_manager, printer_manager, vision_manager, robot_manager, _services_started
-    global _camera_remote_monitor_task
+    global _camera_remote_monitor_task, _robot_remote_monitor_task
 
     if not _services_started:
         return
@@ -315,6 +386,10 @@ async def _shutdown_services() -> None:
         _camera_remote_monitor_task.cancel()
         _camera_remote_monitor_task = None
 
+    if _robot_remote_monitor_task:
+        _robot_remote_monitor_task.cancel()
+        _robot_remote_monitor_task = None
+
     logger.info("👋 すべてのサービスを停止しました")
 
 
@@ -332,6 +407,20 @@ async def _monitor_remote_camera() -> None:
         except Exception:
             pass
         await asyncio.sleep(CAMERA_REMOTE_HEALTH_TTL)
+
+
+async def _monitor_remote_robot() -> None:
+    global robot_manager
+    while True:
+        try:
+            if await _check_remote_robot():
+                if robot_manager:
+                    logger.info("🧭 リモートロボット接続を検出。ローカルロボットを停止します")
+                    await asyncio.to_thread(robot_manager.close)
+                    robot_manager = None
+        except Exception:
+            pass
+        await asyncio.sleep(ROBOT_REMOTE_HEALTH_TTL)
 
 
 @asynccontextmanager
@@ -388,6 +477,11 @@ class RobotJogStopRequest(BaseModel):
 class RobotPointRegisterRequest(BaseModel):
     point_no: int
     comment: str = ""
+
+
+class RobotPointMoveRequest(BaseModel):
+    point_no: int
+    speed_rate: float = 30.0
 
 
 class RobotIOOutputRequest(BaseModel):
@@ -761,16 +855,38 @@ async def printer_present_bed():
 
 # ロボットAPI (TEACHING)
 @app.get("/api/robot/config")
-async def robot_config():
+async def robot_config(request: Request):
     """ロボット設定取得"""
+    if await _check_remote_robot():
+        proxied = await _proxy_robot_request(request, "/api/robot/config")
+        if proxied:
+            return proxied
     if not robot_manager:
         raise HTTPException(status_code=503, detail="ロボットサービスが起動していません")
     return robot_manager.get_config()
 
 
+@app.get("/api/robot/diagnostics")
+async def robot_diagnostics(request: Request):
+    if await _check_remote_robot():
+        proxied = await _proxy_robot_request(request, "/api/robot/diagnostics")
+        if proxied:
+            return proxied
+    if not robot_manager:
+        raise HTTPException(status_code=503, detail="ロボットサービスが起動していません")
+    return {
+        "emg": robot_manager.get_emg_status(),
+        "positions": robot_manager.get_positions(),
+    }
+
+
 @app.post("/api/robot/home")
-async def robot_home():
+async def robot_home(request: Request):
     """原点復帰"""
+    if await _check_remote_robot():
+        proxied = await _proxy_robot_request(request, "/api/robot/home")
+        if proxied:
+            return proxied
     if not robot_manager:
         raise HTTPException(status_code=503, detail="ロボットサービスが起動していません")
     try:
@@ -782,8 +898,12 @@ async def robot_home():
 
 
 @app.post("/api/robot/jog/start")
-async def robot_jog_start(request: RobotJogRequest):
+async def robot_jog_start(request: RobotJogRequest, raw_request: Request):
     """JOG開始（押下中のみ動作）"""
+    if await _check_remote_robot():
+        proxied = await _proxy_robot_request(raw_request, "/api/robot/jog/start")
+        if proxied:
+            return proxied
     if not robot_manager:
         raise HTTPException(status_code=503, detail="ロボットサービスが起動していません")
 
@@ -809,8 +929,12 @@ async def robot_jog_start(request: RobotJogRequest):
 
 
 @app.post("/api/robot/jog/stop")
-async def robot_jog_stop(request: RobotJogStopRequest):
+async def robot_jog_stop(request: RobotJogStopRequest, raw_request: Request):
     """JOG停止"""
+    if await _check_remote_robot():
+        proxied = await _proxy_robot_request(raw_request, "/api/robot/jog/stop")
+        if proxied:
+            return proxied
     if not robot_manager:
         raise HTTPException(status_code=503, detail="ロボットサービスが起動していません")
     try:
@@ -824,8 +948,12 @@ async def robot_jog_stop(request: RobotJogStopRequest):
 
 
 @app.post("/api/robot/stop")
-async def robot_stop_all():
+async def robot_stop_all(request: Request):
     """全停止"""
+    if await _check_remote_robot():
+        proxied = await _proxy_robot_request(request, "/api/robot/stop")
+        if proxied:
+            return proxied
     if not robot_manager:
         raise HTTPException(status_code=503, detail="ロボットサービスが起動していません")
     try:
@@ -837,8 +965,12 @@ async def robot_stop_all():
 
 
 @app.post("/api/robot/point/register")
-async def robot_point_register(request: RobotPointRegisterRequest):
+async def robot_point_register(request: RobotPointRegisterRequest, raw_request: Request):
     """現在位置をポイント登録"""
+    if await _check_remote_robot():
+        proxied = await _proxy_robot_request(raw_request, "/api/robot/point/register")
+        if proxied:
+            return proxied
     if not robot_manager:
         raise HTTPException(status_code=503, detail="ロボットサービスが起動していません")
     try:
@@ -855,9 +987,36 @@ async def robot_point_register(request: RobotPointRegisterRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.post("/api/robot/point/move")
+async def robot_point_move(request: RobotPointMoveRequest, raw_request: Request):
+    """ポイント移動"""
+    if await _check_remote_robot():
+        proxied = await _proxy_robot_request(raw_request, "/api/robot/point/move")
+        if proxied:
+            return proxied
+    if not robot_manager:
+        raise HTTPException(status_code=503, detail="ロボットサービスが起動していません")
+    try:
+        await asyncio.to_thread(
+            robot_manager.move_to_point,
+            request.point_no,
+            request.speed_rate,
+        )
+        return {"status": "ok", "point_no": request.point_no, "speed_rate": request.speed_rate}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"ポイント移動エラー: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.post("/api/robot/io/output")
-async def robot_io_output(request: RobotIOOutputRequest):
+async def robot_io_output(request: RobotIOOutputRequest, raw_request: Request):
     """CAN-IO出力"""
+    if await _check_remote_robot():
+        proxied = await _proxy_robot_request(raw_request, "/api/robot/io/output")
+        if proxied:
+            return proxied
     if not robot_manager:
         raise HTTPException(status_code=503, detail="ロボットサービスが起動していません")
     try:

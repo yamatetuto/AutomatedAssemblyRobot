@@ -19,11 +19,20 @@
 # ----- pip専用パッケージ (aptで利用不可) -----
 
 # WebRTC (カメラストリーミング)
-aiortc>=1.6.0
-# HTTPクライアント（カメラPiプロキシ）
-aiohttp>=3.8.0
+# aiortc>=1.6.0
 # Python3.9.x
-# aiortc>=1.5.0
+aiortc>=1.5.0
+# NOTE (Raspberry Pi): aiortcはPyAV(av)に依存。
+# 1) 既存のapt版python3-avを使う場合は、venvを --system-site-packages で作成し
+#    aiortcは --no-deps でインストールする。
+# 2) pipでPyAVをビルドする場合は、FFmpeg開発ヘッダを先に入れ、
+#    互換のため av==9.2.0 などに固定する。
+# av==9.2.0
+# HTTPクライアント（カメラPiプロキシ）
+# aiohttp>=3.8.0
+# Python3.9.x
+aiohttp>=3.7.4
+
 
 # Modbus通信 (グリッパー制御)
 minimalmodbus>=2.1.1
