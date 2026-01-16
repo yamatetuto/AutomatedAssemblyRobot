@@ -48,6 +48,8 @@ from src.vision.manager import VisionManager
 from src.robot.teaching_manager import TeachingRobotManager
 
 import base64
+import cv2
+import numpy as np
 from datetime import datetime
 
 # ロギング設定
@@ -66,6 +68,7 @@ vision_manager: Optional[VisionManager] = None
 robot_manager: Optional[TeachingRobotManager] = None
 _services_started = False
 _camera_remote_cache = {"ok": False, "ts": 0.0}
+_camera_remote_monitor_task: Optional[asyncio.Task] = None
 
 
 def _save_detection_snapshot(image_base64: str, prefix: str) -> Optional[dict]:
@@ -87,6 +90,43 @@ def _save_detection_snapshot(image_base64: str, prefix: str) -> Optional[dict]:
     except Exception as e:
         logger.warning(f"検出結果スナップショット保存失敗: {e}")
         return None
+
+
+def _annotate_detection_text(image_base64: str, lines: list[str]) -> str:
+    if not image_base64:
+        return image_base64
+    try:
+        img_data = base64.b64decode(image_base64)
+        img_array = np.frombuffer(img_data, dtype=np.uint8)
+        image = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
+        if image is None:
+            return image_base64
+
+        h, w = image.shape[:2]
+        font = cv2.FONT_HERSHEY_SIMPLEX
+        font_scale = 0.6
+        thickness = 2
+        margin = 10
+        line_height = int(22 * font_scale)
+        y = h - margin
+
+        for line in reversed(lines):
+            (text_w, text_h), _ = cv2.getTextSize(line, font, font_scale, thickness)
+            x = max(margin, w - text_w - margin)
+            cv2.rectangle(
+                image,
+                (x - 6, y - text_h - 6),
+                (x + text_w + 6, y + 6),
+                (0, 0, 0),
+                -1,
+            )
+            cv2.putText(image, line, (x, y), font, font_scale, (255, 255, 255), thickness, cv2.LINE_AA)
+            y -= (text_h + 10)
+
+        _, buffer = cv2.imencode('.jpg', image)
+        return base64.b64encode(buffer).decode('utf-8')
+    except Exception:
+        return image_base64
 
 
 async def _check_remote_camera() -> bool:
@@ -146,6 +186,7 @@ async def _proxy_request(request: Request, target_path: str) -> Optional[Respons
 # Lifespan context manager
 async def _startup_services() -> None:
     global camera_manager, gripper_manager, webrtc_manager, printer_manager, vision_manager, robot_manager, _services_started
+    global _camera_remote_monitor_task
 
     if _services_started:
         return
@@ -241,9 +282,13 @@ async def _startup_services() -> None:
 
     logger.info("🎉 すべてのサービスが起動しました")
 
+    if CAMERA_REMOTE_BASE_URL and _camera_remote_monitor_task is None:
+        _camera_remote_monitor_task = asyncio.create_task(_monitor_remote_camera())
+
 
 async def _shutdown_services() -> None:
     global camera_manager, gripper_manager, webrtc_manager, printer_manager, vision_manager, robot_manager, _services_started
+    global _camera_remote_monitor_task
 
     if not _services_started:
         return
@@ -266,7 +311,27 @@ async def _shutdown_services() -> None:
     if robot_manager:
         await asyncio.to_thread(robot_manager.close)
 
+    if _camera_remote_monitor_task:
+        _camera_remote_monitor_task.cancel()
+        _camera_remote_monitor_task = None
+
     logger.info("👋 すべてのサービスを停止しました")
+
+
+async def _monitor_remote_camera() -> None:
+    global camera_manager, webrtc_manager, vision_manager
+    while True:
+        try:
+            if await _check_remote_camera():
+                if camera_manager:
+                    logger.info("📡 リモートカメラ接続を検出。ローカルカメラを停止します")
+                    await camera_manager.stop()
+                    camera_manager = None
+                    webrtc_manager = None
+                    vision_manager = None
+        except Exception:
+            pass
+        await asyncio.sleep(CAMERA_REMOTE_HEALTH_TTL)
 
 
 @asynccontextmanager
@@ -958,7 +1023,14 @@ async def detect_fiber(request: Request):
     
     try:
         result = vision_manager.detect_fiber(frame)
-        snapshot = _save_detection_snapshot(result.get("image_base64", ""), "fiber")
+        lines = [f"Fiber detected: {result.get('detected')}"
+                 f", count: {result.get('count', 0)}"]
+        offset = result.get("offset")
+        if offset:
+            lines.append(f"dx: {offset.get('dx', 0):.2f}, dy: {offset.get('dy', 0):.2f}")
+        annotated = _annotate_detection_text(result.get("image_base64", ""), lines)
+        result["image_base64"] = annotated
+        snapshot = _save_detection_snapshot(annotated, "fiber")
         if snapshot:
             result["snapshot"] = snapshot
         return result
@@ -982,7 +1054,14 @@ async def detect_bead(request: Request):
     
     try:
         result = vision_manager.detect_bead(frame)
-        snapshot = _save_detection_snapshot(result.get("image_base64", ""), "bead")
+        lines = [f"Bead detected: {result.get('detected')}"
+                 f", count: {result.get('count', 0)}"]
+        offset = result.get("offset")
+        if offset:
+            lines.append(f"dx: {offset.get('dx', 0):.2f}, dy: {offset.get('dy', 0):.2f}")
+        annotated = _annotate_detection_text(result.get("image_base64", ""), lines)
+        result["image_base64"] = annotated
+        snapshot = _save_detection_snapshot(annotated, "bead")
         if snapshot:
             result["snapshot"] = snapshot
         return result

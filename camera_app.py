@@ -3,6 +3,8 @@ import asyncio
 import logging
 import signal
 import base64
+import cv2
+import numpy as np
 from datetime import datetime
 from contextlib import asynccontextmanager
 from typing import Optional
@@ -47,6 +49,43 @@ def _save_detection_snapshot(image_base64: str, prefix: str) -> Optional[dict]:
     except Exception as e:
         logger.warning(f"検出結果スナップショット保存失敗: {e}")
         return None
+
+
+def _annotate_detection_text(image_base64: str, lines: list[str]) -> str:
+    if not image_base64:
+        return image_base64
+    try:
+        img_data = base64.b64decode(image_base64)
+        img_array = np.frombuffer(img_data, dtype=np.uint8)
+        image = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
+        if image is None:
+            return image_base64
+
+        h, w = image.shape[:2]
+        font = cv2.FONT_HERSHEY_SIMPLEX
+        font_scale = 0.6
+        thickness = 2
+        margin = 10
+        line_height = int(22 * font_scale)
+        y = h - margin
+
+        for line in reversed(lines):
+            (text_w, text_h), _ = cv2.getTextSize(line, font, font_scale, thickness)
+            x = max(margin, w - text_w - margin)
+            cv2.rectangle(
+                image,
+                (x - 6, y - text_h - 6),
+                (x + text_w + 6, y + 6),
+                (0, 0, 0),
+                -1,
+            )
+            cv2.putText(image, line, (x, y), font, font_scale, (255, 255, 255), thickness, cv2.LINE_AA)
+            y -= (text_h + 10)
+
+        _, buffer = cv2.imencode('.jpg', image)
+        return base64.b64encode(buffer).decode('utf-8')
+    except Exception:
+        return image_base64
 
 
 class WebRTCOffer(BaseModel):
@@ -306,7 +345,14 @@ async def detect_fiber():
         raise HTTPException(status_code=500, detail="画像の取得に失敗しました")
 
     result = vision_manager.detect_fiber(frame)
-    snapshot = _save_detection_snapshot(result.get("image_base64", ""), "fiber")
+    lines = [f"Fiber detected: {result.get('detected')}"
+             f", count: {result.get('count', 0)}"]
+    offset = result.get("offset")
+    if offset:
+        lines.append(f"dx: {offset.get('dx', 0):.2f}, dy: {offset.get('dy', 0):.2f}")
+    annotated = _annotate_detection_text(result.get("image_base64", ""), lines)
+    result["image_base64"] = annotated
+    snapshot = _save_detection_snapshot(annotated, "fiber")
     if snapshot:
         result["snapshot"] = snapshot
     return result
@@ -322,7 +368,14 @@ async def detect_bead():
         raise HTTPException(status_code=500, detail="画像の取得に失敗しました")
 
     result = vision_manager.detect_bead(frame)
-    snapshot = _save_detection_snapshot(result.get("image_base64", ""), "bead")
+    lines = [f"Bead detected: {result.get('detected')}"
+             f", count: {result.get('count', 0)}"]
+    offset = result.get("offset")
+    if offset:
+        lines.append(f"dx: {offset.get('dx', 0):.2f}, dy: {offset.get('dy', 0):.2f}")
+    annotated = _annotate_detection_text(result.get("image_base64", ""), lines)
+    result["image_base64"] = annotated
+    snapshot = _save_detection_snapshot(annotated, "bead")
     if snapshot:
         result["snapshot"] = snapshot
     return result
