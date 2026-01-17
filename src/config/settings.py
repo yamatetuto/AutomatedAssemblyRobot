@@ -100,8 +100,11 @@ ROBOT_SOFT_LIMIT_MIN_MM = float(os.getenv("ROBOT_SOFT_LIMIT_MIN_MM", "10.0"))
 ROBOT_SOFT_LIMIT_MAX_MM = [
 	float(os.getenv("ROBOT_SOFT_LIMIT_MAX_MM_X", "790.5")),
 	float(os.getenv("ROBOT_SOFT_LIMIT_MAX_MM_Y", "240.5")),
-	float(os.getenv("ROBOT_SOFT_LIMIT_MAX_MM_Z", "90.0")),
+	float(os.getenv("ROBOT_SOFT_LIMIT_MAX_MM_Z", "95.0")),
 ]
+
+# ポイント移動速度率 (1-100%)
+ROBOT_POINT_MOVE_SPEED_RATE = float(os.getenv("ROBOT_POINT_MOVE_SPEED_RATE", "5.0"))
 
 # リモートロボット（rootサービス）設定
 ROBOT_REMOTE_BASE_URL = os.getenv("ROBOT_REMOTE_BASE_URL", "").rstrip('/')

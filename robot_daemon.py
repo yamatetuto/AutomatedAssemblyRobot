@@ -16,6 +16,7 @@ from src.config.settings import (
     ROBOT_JOG_POLL_INTERVAL,
     ROBOT_SOFT_LIMIT_MIN_MM,
     ROBOT_SOFT_LIMIT_MAX_MM,
+    ROBOT_POINT_MOVE_SPEED_RATE,
 )
 from src.robot.teaching_manager import TeachingRobotManager
 
@@ -46,13 +47,24 @@ class RobotPointRegisterRequest(BaseModel):
 
 class RobotPointMoveRequest(BaseModel):
     point_no: int
-    speed_rate: float = 30.0
 
 
 class RobotIOOutputRequest(BaseModel):
     board_id: int
     port_no: int
     on: bool
+
+
+class RobotIOInputRequest(BaseModel):
+    board_id: int
+    port_no: int
+
+
+class RobotPositionUpdateRequest(BaseModel):
+    x: float
+    y: float
+    z: float
+    comment: str = ""
 
 
 async def _startup_services() -> None:
@@ -239,6 +251,22 @@ async def robot_io_output(request: RobotIOOutputRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.post("/api/robot/io/input")
+async def robot_io_input(request: RobotIOInputRequest):
+    if not robot_manager:
+        raise HTTPException(status_code=503, detail="ロボットサービスが起動していません")
+    try:
+        result = await asyncio.to_thread(
+            robot_manager.io_input,
+            request.board_id,
+            request.port_no,
+        )
+        return {"status": "ok", "result": result}
+    except Exception as e:
+        logger.error(f"IO入力取得エラー: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.post("/api/robot/point/move")
 async def robot_point_move(request: RobotPointMoveRequest):
     if not robot_manager:
@@ -247,13 +275,58 @@ async def robot_point_move(request: RobotPointMoveRequest):
         await asyncio.to_thread(
             robot_manager.move_to_point,
             request.point_no,
-            request.speed_rate,
+            ROBOT_POINT_MOVE_SPEED_RATE,
         )
-        return {"status": "ok", "point_no": request.point_no, "speed_rate": request.speed_rate}
+        return {"status": "ok", "point_no": request.point_no, "speed_rate": ROBOT_POINT_MOVE_SPEED_RATE}
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         logger.error(f"ポイント移動エラー: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/robot/position_table")
+async def robot_position_table_all():
+    if not robot_manager:
+        raise HTTPException(status_code=503, detail="ロボットサービスが起動していません")
+    try:
+        return {"status": "ok", "data": robot_manager.get_position_table_all()}
+    except Exception as e:
+        logger.error(f"ポジションテーブル取得エラー: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/robot/position_table/{point_no}")
+async def robot_position_table_point(point_no: int):
+    if not robot_manager:
+        raise HTTPException(status_code=503, detail="ロボットサービスが起動していません")
+    try:
+        return {"status": "ok", "data": robot_manager.get_position_table_point(point_no)}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"ポジションテーブル取得エラー: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/robot/position_table/{point_no}")
+async def robot_position_table_update(point_no: int, request: RobotPositionUpdateRequest):
+    if not robot_manager:
+        raise HTTPException(status_code=503, detail="ロボットサービスが起動していません")
+    try:
+        data = await asyncio.to_thread(
+            robot_manager.update_position_table_point,
+            point_no,
+            request.x,
+            request.y,
+            request.z,
+            request.comment,
+        )
+        return {"status": "ok", "data": data}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"ポジションテーブル更新エラー: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

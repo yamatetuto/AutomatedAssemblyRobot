@@ -26,6 +26,7 @@ sleep 1
 
 echo "[start] app.py"
 nohup python "$PROJECT_ROOT/app.py" > "$APP_LOG" 2>&1 &
+echo "[URL] http://10.32.77.151:8080"
 
 echo "robot_daemon log: $ROBOT_LOG"
 

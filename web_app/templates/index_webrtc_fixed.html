@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>自動組立ロボット制御 v2.1</title>
-        <link rel="stylesheet" href="/static/css/style.css?v=1762686546">
+        <link rel="stylesheet" href="/static/css/style.css?v=1762693000">
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 </head>
 <body>
@@ -19,9 +19,15 @@
                     <div id="connectionStatus" class="status connecting">接続中...</div>
                     <div id="cameraRemoteStatus" class="status connecting">📡 カメラPi: --</div>
                     <video id="videoElement" autoplay playsinline muted></video>
+                    <div id="crosshairOverlay" class="crosshair-overlay hidden" aria-hidden="true">
+                        <div class="crosshair-line horizontal"></div>
+                        <div class="crosshair-line vertical"></div>
+                        <div class="crosshair-dot"></div>
+                    </div>
                 </div>
                 <div class="video-controls">
                     <button class="success" onclick="takeSnapshot()">📸 スナップショット</button>
+                    <button type="button" class="secondary" onclick="toggleCrosshair()">🎯 照準</button>
                     <button onclick="detectFiber()" style="background: linear-gradient(135deg, #3498db 0%, #2980b9 100%);">📏 Fiber</button>
                     <button onclick="detectBead()" style="background: linear-gradient(135deg, #f1c40f 0%, #f39c12 100%);">🔵 Bead</button>
                     <select id="resolutionSelect" onchange="changeResolution()">
@@ -189,7 +195,6 @@
                             <div style="width: 32%;">Y: <span id="robotPosY">--</span></div>
                             <div style="width: 32%;">Z: <span id="robotPosZ">--</span></div>
                         </div>
-                        <button class="secondary" onclick="refreshRobotPosition()" style="width: 100%;">🔄 現在位置取得</button>
                     </div>
 
                     <div class="button-row" style="margin-bottom: 10px;">
@@ -215,8 +220,16 @@
                     </div>
 
                     <div class="control-group">
-                        <label>ポイント番号:</label>
-                        <input type="number" id="robotPointNo" min="0" value="1">
+                        <label>登録ポイント番号:</label>
+                        <input type="number" id="robotRegisterPointNo" min="0" value="1">
+                    </div>
+                    <div class="control-group">
+                        <label>登録ポイント座標 (mm):</label>
+                        <div class="button-row" style="margin-bottom: 5px;">
+                            <div style="width: 32%;">X: <span id="robotRegisterPointX">--</span></div>
+                            <div style="width: 32%;">Y: <span id="robotRegisterPointY">--</span></div>
+                            <div style="width: 32%;">Z: <span id="robotRegisterPointZ">--</span></div>
+                        </div>
                     </div>
                     <div class="control-group">
                         <label>コメント:</label>
@@ -225,20 +238,66 @@
                     <button onclick="registerRobotPoint()" style="width: 100%; margin-bottom: 10px;">💾 現在位置を登録</button>
 
                     <div class="control-group">
-                        <label>ポイント移動 速度率 (1-100%):</label>
-                        <input type="number" id="robotPointSpeedRate" min="1" max="100" value="30">
+                        <label>移動ポイント番号:</label>
+                        <input type="number" id="robotMovePointNo" min="0" value="1">
+                    </div>
+                    <div class="control-group">
+                        <label>移動ポイント座標 (mm):</label>
+                        <div class="button-row" style="margin-bottom: 5px;">
+                            <div style="width: 32%;">X: <span id="robotMovePointX">--</span></div>
+                            <div style="width: 32%;">Y: <span id="robotMovePointY">--</span></div>
+                            <div style="width: 32%;">Z: <span id="robotMovePointZ">--</span></div>
+                        </div>
                     </div>
                     <button onclick="moveRobotPoint()" style="width: 100%; margin-bottom: 10px;">🎯 ポイントへ移動</button>
 
                     <div class="control-group">
                         <label>IO出力 (CAN):</label>
-                        <div class="button-row" style="margin-bottom: 5px;">
-                            <input type="number" id="robotIoBoard" min="0" max="15" value="1" style="width: 48%;">
-                            <input type="number" id="robotIoPort" min="0" max="31" value="0" style="width: 48%;">
-                        </div>
-                        <div class="button-row">
-                            <button class="success" onclick="robotIoOutput(true)">ON</button>
-                            <button class="secondary" onclick="robotIoOutput(false)">OFF</button>
+                        <div class="io-grid">
+                            <div class="io-card">
+                                <div class="io-card-title">手動 IO</div>
+                                <div class="button-row" style="margin-bottom: 6px;">
+                                    <input type="number" id="robotIoBoard" min="0" max="15" value="1" placeholder="ID" style="width: 48%;">
+                                    <input type="number" id="robotIoPort" min="0" max="31" value="0" placeholder="Port" style="width: 48%;">
+                                </div>
+                                <div class="io-card-note">現在状態: <span id="robotIoStatus">--</span></div>
+                                <div class="button-row tight">
+                                    <button class="success" onclick="manualRobotIoOutput(true)">ON</button>
+                                    <button class="secondary" onclick="manualRobotIoOutput(false)">OFF</button>
+                                </div>
+                            </div>
+                            <div class="io-card">
+                                <div class="io-card-title">ディスペンス</div>
+                                <button class="success" onclick="triggerDispense()">💧 ディスペンス</button>
+                                <div class="io-card-note">ID1 / Port0 / 0.1s</div>
+                            </div>
+
+                            <div class="io-card">
+                                <div class="io-card-title">EC1</div>
+                                <div class="button-row tight">
+                                    <button onclick="triggerEcPulse(1, 'up')">⬆ UP</button>
+                                    <button class="secondary" onclick="triggerEcPulse(1, 'down')">⬇ DOWN</button>
+                                </div>
+                                <div class="io-card-note">UP: ID2 Port16 / DOWN: Port17（排他ON）</div>
+                            </div>
+
+                            <div class="io-card">
+                                <div class="io-card-title">EC2</div>
+                                <div class="button-row tight">
+                                    <button onclick="triggerEcPulse(2, 'up')">⬆ UP</button>
+                                    <button class="secondary" onclick="triggerEcPulse(2, 'down')">⬇ DOWN</button>
+                                </div>
+                                <div class="io-card-note">UP: ID2 Port20 / DOWN: Port21（排他ON）</div>
+                            </div>
+
+                            <div class="io-card">
+                                <div class="io-card-title">EC3</div>
+                                <div class="button-row tight">
+                                    <button onclick="triggerEcPulse(3, 'up')">⬆ UP</button>
+                                    <button class="secondary" onclick="triggerEcPulse(3, 'down')">⬇ DOWN</button>
+                                </div>
+                                <div class="io-card-note">UP: ID2 Port24 / DOWN: Port25（排他ON）</div>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -313,6 +372,64 @@
                     </div>
                 </div>
             </div>
+
+            <div class="panel">
+                <div class="panel-header" onclick="togglePanel('robotpostable')">
+                    <h2>📍 ロボット ポジションテーブル</h2>
+                    <span class="toggle-icon collapsed" id="robotpostable-toggle">▼</span>
+                </div>
+                <div class="panel-body collapsed" id="robotpostable-body">
+                    <div class="button-row" style="margin-bottom: 10px;">
+                        <button onclick="loadAllRobotPositions()">📥 全件読込</button>
+                        <button onclick="toggleRobotTableView()">🔄 表示切替</button>
+                    </div>
+
+                    <div id="robotPosTableList" style="display:none;">
+                        <div class="postable-container">
+                            <table class="postable-table">
+                                <thead>
+                                    <tr>
+                                        <th>Point</th>
+                                        <th>X (mm)</th>
+                                        <th>Y (mm)</th>
+                                        <th>Z (mm)</th>
+                                        <th>Comment</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="robotPosTableBody">
+                                </tbody>
+                            </table>
+                        </div>
+                        <div class="pagination" id="robotPosPagination"></div>
+                    </div>
+
+                    <div id="robotPosTableEdit">
+                        <div class="control-group">
+                            <label>ポイント番号:</label>
+                            <input type="number" id="robotPosTableSelect" min="0" value="1">
+                            <button onclick="loadRobotPositionTable()">📥 読込</button>
+                        </div>
+
+                        <div class="control-group">
+                            <label>X (mm):</label>
+                            <input type="number" id="robot_pt_x" step="0.01" value="0">
+                        </div>
+                        <div class="control-group">
+                            <label>Y (mm):</label>
+                            <input type="number" id="robot_pt_y" step="0.01" value="0">
+                        </div>
+                        <div class="control-group">
+                            <label>Z (mm):</label>
+                            <input type="number" id="robot_pt_z" step="0.01" value="0">
+                        </div>
+                        <div class="control-group">
+                            <label>コメント:</label>
+                            <input type="text" id="robot_pt_comment" placeholder="comment">
+                        </div>
+                        <button onclick="saveRobotPositionTable()" style="width: 100%; margin-bottom: 10px;">💾 保存</button>
+                    </div>
+                </div>
+            </div>
         </div>
     </div>
     
@@ -333,6 +450,6 @@
         </div>
     </div>
     
-        <script src="/static/js/app.js?v=1762686546"></script>
+        <script src="/static/js/app.js?v=1762693000"></script>
 </body>
 </html>

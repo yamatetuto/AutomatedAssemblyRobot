@@ -167,7 +167,12 @@ sudo usermod -a -G video,dialout $USER
 
 ```bash
 cd ~/AutomatedAssemblyRobot
+# 起動
+scripts/start_robot_app.sh
+cd ~/AutomatedAssemblyRobot
 python app.py
+# 停止
+scripts/start_robot_app.sh
 ```
 
 **アクセス**: ブラウザで `http://<Raspberry_PiのIPアドレス>:8080` を開く
@@ -193,18 +198,22 @@ python app.py
   - **🆕 把持状態判定**: 成功/失敗/警告/移動中の自動判定
 - **📊 ステータス表示**: 右上に現在位置とサーボ状態を常時表示
 
-### ロボットデーモン + app.py 同時起動
-
-robot_daemon と app.py を同時に起動するスクリプトを追加しました。
-
-- 起動: scripts/start_robot_app.sh
-- 停止: scripts/stop_robot_app.sh
-
-起動時に sudo 認証が必要です（robot_daemon 起動のため）。
-
 ログ出力:
 - logs/robot_daemon.log
 - logs/app.log
+
+### ロボットデーモンとapp.py個別起動
+
+```bash
+# Terminal 1
+cd ~/AutomatedAssemblyRobot
+python app.py
+```
+```bash
+# Terminal 2
+cd ~/AutomatedAssemblyRobot
+sudo python robot_deamon.py
+```
 
 ### バックグラウンド起動
 

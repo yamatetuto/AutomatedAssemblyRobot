@@ -167,7 +167,77 @@ class TeachingRobotManager:
     def io_output(self, board_id: int, port_no: int, on: bool) -> bool:
         with self._lock:
             self._ensure_ready()
-            return bool(self._robot.canio_output(board_id, port_no, on))
+            return bool(self._robot.canio_output(int(board_id), int(port_no), on))
+
+    def io_input(self, board_id: int, port_no: int) -> bool:
+        with self._lock:
+            self._ensure_ready()
+            board_id = int(board_id)
+            port_no = int(port_no)
+            data = int(self._robot.canio_inputInt(board_id))
+            return bool(data & (1 << port_no))
+
+    def get_position_table_point(self, point_no: int) -> Dict[str, Any]:
+        with self._lock:
+            self._ensure_ready()
+            if point_no < 0:
+                raise ValueError("point_no must be >= 0")
+            pos_file = self._load_position_file()
+            item_index = self._find_point_index(pos_file, point_no)
+            if item_index is None:
+                raise ValueError("Point not found")
+            return self._get_point_data(pos_file, item_index)
+
+    def get_position_table_all(self) -> list[Dict[str, Any]]:
+        with self._lock:
+            self._ensure_ready()
+            pos_file = self._load_position_file()
+            results: list[Dict[str, Any]] = []
+            for idx in range(len(self._file_ctrl.PositionFileClass.position_data_list)):
+                try:
+                    results.append(self._get_point_data(pos_file, idx))
+                except Exception:
+                    continue
+            return results
+
+    def update_position_table_point(self, point_no: int, x: float, y: float, z: float, comment: str) -> Dict[str, Any]:
+        with self._lock:
+            self._ensure_ready()
+            if point_no < 0:
+                raise ValueError("point_no must be >= 0")
+            pos_file = self._load_position_file()
+            item_index = self._find_point_index(pos_file, point_no)
+            if item_index is None:
+                pos_file.add_point(point_no, "")
+                pos_file.read_position_file()
+                item_index = self._find_point_index(pos_file, point_no)
+            if item_index is None:
+                raise RuntimeError("Failed to find point")
+
+            current = self._get_point_data(pos_file, item_index)
+            is_abs = bool(int(current.get("is_abs", 0)))
+            is_protect = bool(int(current.get("is_protect", 0)))
+
+            pos_file.update_pos(
+                item_index,
+                point_no,
+                is_abs,
+                float(x),
+                float(y),
+                float(z),
+                float(current.get("u", 0.0)),
+                float(current.get("s1", 0.0)),
+                float(current.get("s2", 0.0)),
+                float(current.get("a", 0.0)),
+                float(current.get("b", 0.0)),
+                is_protect,
+                comment or "",
+            )
+            pos_file.read_position_file()
+            item_index = self._find_point_index(pos_file, point_no)
+            if item_index is None:
+                raise RuntimeError("Failed to read updated point")
+            return self._get_point_data(pos_file, item_index)
 
     def get_config(self) -> Dict[str, Any]:
         return {
@@ -276,17 +346,83 @@ class TeachingRobotManager:
         ok, message = pos_file.read_position_file()
         if not ok:
             raise RuntimeError(message)
+        self._sanitize_position_list(pos_file)
         return pos_file
 
     def _find_point_index(self, pos_file, point_no: int) -> Optional[int]:
         for idx in range(len(self._file_ctrl.PositionFileClass.position_data_list)):
-            try:
-                pno = int(pos_file.ret_position_data(idx, 0))
-            except Exception:
+            data = self._parse_position_line(idx)
+            if not data:
                 continue
-            if pno == int(point_no):
+            if data["point_no"] == int(point_no):
                 return idx
         return None
+
+    def _get_point_data(self, pos_file, item_index: int) -> Dict[str, Any]:
+        data = self._parse_position_line(item_index)
+        if not data:
+            raise ValueError("Invalid position data")
+        return data
+
+    def _parse_position_line(self, item_index: int) -> Optional[Dict[str, Any]]:
+        try:
+            line = self._file_ctrl.PositionFileClass.position_data_list[item_index]
+        except Exception:
+            return None
+        if not line or "=" not in line:
+            return None
+        try:
+            payload = line.split("=", 1)[1]
+        except Exception:
+            return None
+        parts = payload.split(",")
+        if len(parts) < 1:
+            return None
+        while len(parts) < 12:
+            parts.append("")
+        return {
+            "point_no": self._safe_int(parts[0]),
+            "is_abs": self._safe_int(parts[1]),
+            "x": self._safe_float(parts[2]),
+            "y": self._safe_float(parts[3]),
+            "z": self._safe_float(parts[4]),
+            "u": self._safe_float(parts[5]),
+            "s1": self._safe_float(parts[6]),
+            "s2": self._safe_float(parts[7]),
+            "a": self._safe_float(parts[8]),
+            "b": self._safe_float(parts[9]),
+            "is_protect": self._safe_int(parts[10]),
+            "comment": str(parts[11]),
+        }
+
+    def _sanitize_position_list(self, pos_file) -> None:
+        original = list(self._file_ctrl.PositionFileClass.position_data_list)
+        cleaned = [line for line in original if isinstance(line, str) and "=" in line]
+        if len(cleaned) != len(original):
+            self._file_ctrl.PositionFileClass.position_data_list = cleaned
+            pos_file.create_position_file()
+
+    def _safe_float(self, value: Any, default: float = 0.0) -> float:
+        try:
+            if value is None:
+                return default
+            text = str(value).strip()
+            if text == "":
+                return default
+            return float(text)
+        except Exception:
+            return default
+
+    def _safe_int(self, value: Any, default: int = 0) -> int:
+        try:
+            if value is None:
+                return default
+            text = str(value).strip()
+            if text == "":
+                return default
+            return int(float(text))
+        except Exception:
+            return default
 
     def _load_teaching_modules(self) -> None:
         if self._splebo is not None:

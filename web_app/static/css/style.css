@@ -162,6 +162,52 @@ body {
     background: #000;
 }
 
+.crosshair-overlay {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    display: block;
+    z-index: 5;
+}
+
+.crosshair-overlay.hidden {
+    display: none;
+}
+
+.crosshair-line {
+    position: absolute;
+    background: rgba(0, 212, 255, 0.9);
+    box-shadow: 0 0 8px rgba(0, 212, 255, 0.8);
+}
+
+.crosshair-line.horizontal {
+    height: 2px;
+    width: 100%;
+    top: 50%;
+    left: 0;
+    transform: translateY(-50%);
+}
+
+.crosshair-line.vertical {
+    width: 2px;
+    height: 100%;
+    left: 50%;
+    top: 0;
+    transform: translateX(-50%);
+}
+
+.crosshair-dot {
+    position: absolute;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: rgba(0, 212, 255, 0.95);
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    box-shadow: 0 0 10px rgba(0, 212, 255, 0.9);
+}
+
 .status {
     text-align: center;
     padding: 8px;
@@ -266,6 +312,37 @@ button.success {
 .button-row button {
     flex: 1;
     min-width: 100px;
+}
+
+.io-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 10px;
+}
+
+.io-card {
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(0, 212, 255, 0.2);
+    border-radius: 8px;
+    padding: 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.io-card-title {
+    font-weight: 700;
+    color: #00d4ff;
+    font-size: 0.95em;
+}
+
+.io-card-note {
+    font-size: 0.8em;
+    color: #a5d8ff;
+}
+
+.io-card .button-row button {
+    min-width: 0;
 }
 
 .gripper-status-fixed {

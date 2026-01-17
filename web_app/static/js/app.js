@@ -9,6 +9,15 @@ let printerStatusDisabled = false;
 let robotConfig = null;
 let activeJogAxis = null;
 let robotPositionInterval = null;
+let robotPositions = [];
+let robotPosCurrentPage = 0;
+const robotPosItemsPerPage = 10;
+let isRobotTableView = false;
+let ecOutputState = {
+    1: null,
+    2: null,
+    3: null
+};
 
 function showToast(message, type = 'info') {
     const toast = document.getElementById('toast');
@@ -35,6 +44,21 @@ function togglePanel(panelId) {
     icon.classList.toggle('collapsed');
 }
 
+function bindManualIoInputs() {
+    const boardInput = document.getElementById('robotIoBoard');
+    const portInput = document.getElementById('robotIoPort');
+    if (!boardInput || !portInput) return;
+
+    const handler = () => {
+        robotIoRefreshStatus();
+    };
+    boardInput.addEventListener('change', handler);
+    boardInput.addEventListener('input', handler);
+    portInput.addEventListener('change', handler);
+    portInput.addEventListener('input', handler);
+    robotIoRefreshStatus();
+}
+
 function updateConnectionStatus(status) {
     const statusDiv = document.getElementById('connectionStatus');
     statusDiv.className = 'status ' + status;
@@ -46,12 +70,18 @@ function updateConnectionStatus(status) {
     statusDiv.textContent = messages[status] || status;
 }
 
+function toggleCrosshair() {
+    const overlay = document.getElementById('crosshairOverlay');
+    if (!overlay) return;
+    overlay.classList.toggle('hidden');
+}
+
 function updateCameraRemoteStatus(connected, enabled) {
     const statusDiv = document.getElementById('cameraRemoteStatus');
     if (!statusDiv) return;
     if (!enabled) {
         statusDiv.className = 'status connected';
-        statusDiv.textContent = '📡 カメラPi: 無効 (ローカル)';
+        statusDiv.textContent = '📹 ローカルカメラ使用中';
         return;
     }
     statusDiv.className = 'status ' + (connected ? 'connected' : 'disconnected');
@@ -63,7 +93,33 @@ async function refreshCameraRemoteStatus() {
         const response = await fetch('/api/camera/remote_status');
         if (!response.ok) return;
         const data = await response.json();
-        updateCameraRemoteStatus(data.connected, data.enabled);
+        if (!data.enabled) {
+            updateCameraRemoteStatus(false, false);
+            return;
+        }
+        if (data.connected) {
+            updateCameraRemoteStatus(true, true);
+            return;
+        }
+
+        let localActive = false;
+        try {
+            const localResp = await fetch('/api/camera/status');
+            if (localResp.ok) {
+                const localData = await localResp.json();
+                localActive = localData.status === 'ok' && localData.has_frame;
+            }
+        } catch (e) {
+            localActive = false;
+        }
+
+        const statusDiv = document.getElementById('cameraRemoteStatus');
+        if (statusDiv) {
+            statusDiv.className = 'status disconnected';
+            statusDiv.textContent = localActive
+                ? '📡 カメラPi: 未接続（ローカル使用中）'
+                : '📡 カメラPi: 未接続';
+        }
     } catch (error) {
         console.error('カメラPi状態取得エラー:', error);
     }
@@ -501,6 +557,7 @@ window.onload = () => {
     startPrinterMonitor();
     setInterval(updateGripperStatus, 2000);
     setupRobotControls();
+    bindManualIoInputs();
     refreshCameraRemoteStatus();
     setInterval(refreshCameraRemoteStatus, 5000);
 };
@@ -516,6 +573,20 @@ async function setupRobotControls() {
     await refreshRobotPosition();
     if (!robotPositionInterval) {
         robotPositionInterval = setInterval(refreshRobotPosition, 1000);
+    }
+
+    const registerPointInput = document.getElementById('robotRegisterPointNo');
+    if (registerPointInput) {
+        registerPointInput.addEventListener('change', refreshRegisterPointPosition);
+        registerPointInput.addEventListener('input', refreshRegisterPointPosition);
+        await refreshRegisterPointPosition();
+    }
+
+    const movePointInput = document.getElementById('robotMovePointNo');
+    if (movePointInput) {
+        movePointInput.addEventListener('change', refreshMovePointPosition);
+        movePointInput.addEventListener('input', refreshMovePointPosition);
+        await refreshMovePointPosition();
     }
 }
 
@@ -647,8 +718,56 @@ async function refreshRobotPosition() {
     }
 }
 
+async function refreshPointPosition(pointInputId, xId, yId, zId, label) {
+    const pointNoInput = document.getElementById(pointInputId);
+    const pointNo = pointNoInput ? parseInt(pointNoInput.value, 10) : 0;
+    const xEl = document.getElementById(xId);
+    const yEl = document.getElementById(yId);
+    const zEl = document.getElementById(zId);
+
+    try {
+        const response = await fetch(`/api/robot/position_table/${pointNo}`);
+        if (!response.ok) {
+            if (xEl) xEl.textContent = '--';
+            if (yEl) yEl.textContent = '--';
+            if (zEl) zEl.textContent = '--';
+            return;
+        }
+        const data = await response.json();
+        const pos = data.data || {};
+        if (xEl) xEl.textContent = (pos.x ?? 0).toFixed(2);
+        if (yEl) yEl.textContent = (pos.y ?? 0).toFixed(2);
+        if (zEl) zEl.textContent = (pos.z ?? 0).toFixed(2);
+    } catch (error) {
+        if (xEl) xEl.textContent = '--';
+        if (yEl) yEl.textContent = '--';
+        if (zEl) zEl.textContent = '--';
+        console.error(`${label}座標取得エラー:`, error);
+    }
+}
+
+async function refreshRegisterPointPosition() {
+    return refreshPointPosition(
+        'robotRegisterPointNo',
+        'robotRegisterPointX',
+        'robotRegisterPointY',
+        'robotRegisterPointZ',
+        '登録ポイント'
+    );
+}
+
+async function refreshMovePointPosition() {
+    return refreshPointPosition(
+        'robotMovePointNo',
+        'robotMovePointX',
+        'robotMovePointY',
+        'robotMovePointZ',
+        '移動ポイント'
+    );
+}
+
 async function registerRobotPoint() {
-    const pointNoInput = document.getElementById('robotPointNo');
+    const pointNoInput = document.getElementById('robotRegisterPointNo');
     const commentInput = document.getElementById('robotPointComment');
     const pointNo = pointNoInput ? parseInt(pointNoInput.value, 10) : 0;
     const comment = commentInput ? commentInput.value : '';
@@ -664,22 +783,22 @@ async function registerRobotPoint() {
             throw new Error(payload.detail || 'ポイント登録に失敗しました');
         }
         showToast('ポイントを登録しました', 'success');
+        await refreshRegisterPointPosition();
+        await refreshMovePointPosition();
     } catch (error) {
         showToast(error.message, 'error');
     }
 }
 
 async function moveRobotPoint() {
-    const pointNoInput = document.getElementById('robotPointNo');
-    const speedRateInput = document.getElementById('robotPointSpeedRate');
+    const pointNoInput = document.getElementById('robotMovePointNo');
     const pointNo = pointNoInput ? parseInt(pointNoInput.value, 10) : 0;
-    const speedRate = speedRateInput ? parseFloat(speedRateInput.value) : 30.0;
 
     try {
         const response = await fetch('/api/robot/point/move', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ point_no: pointNo, speed_rate: speedRate })
+            body: JSON.stringify({ point_no: pointNo })
         });
         const payload = await response.json().catch(() => ({}));
         if (!response.ok) {
@@ -691,26 +810,242 @@ async function moveRobotPoint() {
     }
 }
 
-async function robotIoOutput(on) {
+// ロボットポジションテーブル: 個別読み込み
+async function loadRobotPositionTable() {
+    const pointNoInput = document.getElementById('robotPosTableSelect');
+    const pointNo = pointNoInput ? parseInt(pointNoInput.value, 10) : 0;
+    const response = await fetch(`/api/robot/position_table/${pointNo}`);
+    const data = await response.json();
+
+    if (data.status === 'ok') {
+        const pos = data.data || {};
+        document.getElementById('robot_pt_x').value = pos.x ?? 0;
+        document.getElementById('robot_pt_y').value = pos.y ?? 0;
+        document.getElementById('robot_pt_z').value = pos.z ?? 0;
+        document.getElementById('robot_pt_comment').value = pos.comment ?? '';
+        showToast(`ポイント${pointNo}のデータを読み込みました`, 'success');
+    } else {
+        showToast('読み込み失敗: ' + data.message, 'error');
+    }
+}
+
+// ロボットポジションテーブル: 個別保存
+async function saveRobotPositionTable() {
+    const pointNo = parseInt(document.getElementById('robotPosTableSelect').value);
+    const payload = {
+        x: parseFloat(document.getElementById('robot_pt_x').value),
+        y: parseFloat(document.getElementById('robot_pt_y').value),
+        z: parseFloat(document.getElementById('robot_pt_z').value),
+        comment: document.getElementById('robot_pt_comment').value
+    };
+
+    const response = await fetch(`/api/robot/position_table/${pointNo}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+    });
+
+    const result = await response.json();
+    if (result.status === 'ok') {
+        showToast('ロボットポジションを保存しました', 'success');
+        if (robotPositions.length > 0) {
+            const index = robotPositions.findIndex(pos => pos.point_no === pointNo);
+            if (index !== -1) {
+                robotPositions[index] = result.data;
+                if (isRobotTableView) {
+                    displayRobotPositionTable();
+                }
+            }
+        }
+        await refreshRegisterPointPosition();
+    } else {
+        showToast('保存失敗: ' + result.message, 'error');
+    }
+}
+
+// ロボットポジションテーブル: 全件読み込み
+async function loadAllRobotPositions() {
+    showToast('ロボットポジションを読み込み中...', 'info');
+    robotPositions = [];
+    try {
+        const response = await fetch('/api/robot/position_table');
+        const data = await response.json();
+        if (data.status === 'ok') {
+            robotPositions = data.data || [];
+        }
+    } catch (error) {
+        console.error('ロボットポジション取得エラー:', error);
+    }
+
+    showToast(`${robotPositions.length}件のデータを読み込みました`, 'success');
+    robotPosCurrentPage = 0;
+    displayRobotPositionTable();
+
+    if (!isRobotTableView) {
+        toggleRobotTableView();
+    }
+}
+
+// ロボットポジションテーブル: 表示切替
+function toggleRobotTableView() {
+    isRobotTableView = !isRobotTableView;
+    document.getElementById('robotPosTableList').style.display = isRobotTableView ? 'block' : 'none';
+    document.getElementById('robotPosTableEdit').style.display = isRobotTableView ? 'none' : 'block';
+
+    if (isRobotTableView && robotPositions.length > 0) {
+        displayRobotPositionTable();
+    }
+}
+
+// ロボットポジションテーブル: ページ表示
+function displayRobotPositionTable() {
+    const tbody = document.getElementById('robotPosTableBody');
+    tbody.innerHTML = '';
+
+    const start = robotPosCurrentPage * robotPosItemsPerPage;
+    const end = Math.min(start + robotPosItemsPerPage, robotPositions.length);
+
+    for (let i = start; i < end; i++) {
+        const pos = robotPositions[i];
+        const row = tbody.insertRow();
+        row.onclick = () => editRobotPositionFromTable(pos.point_no);
+        row.innerHTML = `
+            <td>${pos.point_no}</td>
+            <td>${(pos.x ?? 0).toFixed(2)}</td>
+            <td>${(pos.y ?? 0).toFixed(2)}</td>
+            <td>${(pos.z ?? 0).toFixed(2)}</td>
+            <td>${pos.comment ?? ''}</td>
+        `;
+    }
+
+    const totalPages = Math.ceil(robotPositions.length / robotPosItemsPerPage);
+    const pagination = document.getElementById('robotPosPagination');
+    pagination.innerHTML = '';
+
+    for (let i = 0; i < totalPages; i++) {
+        const btn = document.createElement('button');
+        btn.textContent = i + 1;
+        btn.className = i === robotPosCurrentPage ? 'active' : '';
+        btn.onclick = () => {
+            robotPosCurrentPage = i;
+            displayRobotPositionTable();
+        };
+        pagination.appendChild(btn);
+    }
+}
+
+// ロボットポジションテーブル: テーブルから編集
+function editRobotPositionFromTable(pointNo) {
+    toggleRobotTableView();
+    document.getElementById('robotPosTableSelect').value = pointNo;
+    loadRobotPositionTable();
+}
+
+async function robotIoOutput(boardId, portNo, on) {
+    const response = await fetch('/api/robot/io/output', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ board_id: boardId, port_no: portNo, on })
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+        throw new Error(payload.detail || 'IO出力に失敗しました');
+    }
+    return payload;
+}
+
+async function robotIoRefreshStatus() {
     const boardInput = document.getElementById('robotIoBoard');
     const portInput = document.getElementById('robotIoPort');
-    const boardId = boardInput ? parseInt(boardInput.value, 10) : 0;
-    const portNo = portInput ? parseInt(portInput.value, 10) : 0;
+    const statusEl = document.getElementById('robotIoStatus');
+    if (!boardInput || !portInput || !statusEl) return;
+    const boardId = parseInt(boardInput.value, 10);
+    const portNo = parseInt(portInput.value, 10);
 
     try {
-        const response = await fetch('/api/robot/io/output', {
+        const response = await fetch('/api/robot/io/input', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ board_id: boardId, port_no: portNo, on })
+            body: JSON.stringify({ board_id: boardId, port_no: portNo })
         });
         const payload = await response.json().catch(() => ({}));
         if (!response.ok) {
-            throw new Error(payload.detail || 'IO出力に失敗しました');
+            throw new Error(payload.detail || 'IO状態取得に失敗しました');
         }
+        statusEl.textContent = payload.result ? 'ON' : 'OFF';
+    } catch (error) {
+        statusEl.textContent = '--';
+        console.error('IO状態取得エラー:', error);
+    }
+}
+
+async function manualRobotIoOutput(on) {
+    const boardInput = document.getElementById('robotIoBoard');
+    const portInput = document.getElementById('robotIoPort');
+    if (!boardInput || !portInput) return;
+    const boardId = parseInt(boardInput.value, 10);
+    const portNo = parseInt(portInput.value, 10);
+
+    try {
+        await robotIoOutput(boardId, portNo, on);
+        await robotIoRefreshStatus();
         showToast('IO出力を更新しました', 'success');
     } catch (error) {
         showToast(error.message, 'error');
     }
+}
+
+async function pulseRobotIo(boardId, portNo, label, durationMs = 100) {
+    try {
+        await robotIoOutput(boardId, portNo, true);
+        setTimeout(() => {
+            robotIoOutput(boardId, portNo, false).catch((offError) => {
+                console.error(`${label} OFF失敗:`, offError);
+            });
+        }, durationMs);
+        showToast(`${label}を出力しました`, 'success');
+    } catch (error) {
+        showToast(error.message, 'error');
+    }
+}
+
+function triggerDispense() {
+    pulseRobotIo(1, 0, 'ディスペンス (ID1 Port0)');
+}
+
+const ecPortMap = {
+    1: { up: 16, down: 17 },
+    2: { up: 20, down: 21 },
+    3: { up: 24, down: 25 }
+};
+
+async function setEcOutput(ecIndex, direction) {
+    const mapping = ecPortMap[ecIndex];
+    if (!mapping) return;
+
+    const current = ecOutputState[ecIndex];
+    if (current === direction) {
+        showToast(`EC${ecIndex} ${direction.toUpperCase()} は既にONです`, 'info');
+        return;
+    }
+
+    try {
+        if (current) {
+            const currentPort = mapping[current];
+            await robotIoOutput(2, currentPort, false);
+        }
+
+        const nextPort = mapping[direction];
+        await robotIoOutput(2, nextPort, true);
+        ecOutputState[ecIndex] = direction;
+        showToast(`EC${ecIndex} ${direction.toUpperCase()} をONにしました`, 'success');
+    } catch (error) {
+        showToast(error.message, 'error');
+    }
+}
+
+function triggerEcPulse(ecIndex, direction) {
+    setEcOutput(ecIndex, direction);
 }
 
 

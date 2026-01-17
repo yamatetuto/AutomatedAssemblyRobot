@@ -4,7 +4,6 @@ src/モジュールを使用したWebアプリケーション
 """
 import asyncio
 import logging
-import signal
 import time
 from pathlib import Path
 from typing import Optional
@@ -44,6 +43,7 @@ from src.config.settings import (
     ROBOT_JOG_POLL_INTERVAL,
     ROBOT_SOFT_LIMIT_MIN_MM,
     ROBOT_SOFT_LIMIT_MAX_MM,
+    ROBOT_POINT_MOVE_SPEED_RATE,
 )
 from src.printer.octoprint_client import OctoPrintClient, OctoPrintError
 from src.printer.printer_manager import PrinterManager
@@ -65,7 +65,6 @@ logger = logging.getLogger(__name__)
 # グローバルインスタンス
 camera_manager: Optional[CameraManager] = None
 gripper_manager: Optional[GripperManager] = None
-webrtc_manager: Optional[WebRTCManager] = None
 printer_manager: Optional[PrinterManager] = None
 vision_manager: Optional[VisionManager] = None
 robot_manager: Optional[TeachingRobotManager] = None
@@ -74,7 +73,6 @@ _camera_remote_cache = {"ok": False, "ts": 0.0}
 _camera_remote_monitor_task: Optional[asyncio.Task] = None
 _robot_remote_cache = {"ok": False, "ts": 0.0}
 _robot_remote_monitor_task: Optional[asyncio.Task] = None
-
 
 def _save_detection_snapshot(image_base64: str, prefix: str) -> Optional[dict]:
     if not image_base64:
@@ -262,8 +260,7 @@ async def _startup_services() -> None:
     remote_robot_ok = False
     if ROBOT_REMOTE_BASE_URL:
         remote_robot_ok = await _check_remote_robot()
-        if remote_robot_ok:
-            logger.info("🧭 リモートロボット接続を使用します（ローカルロボットは起動しません）")
+        logger.info("🧭 リモートロボット接続を使用します（ローカルロボットは起動しません）")
 
     # カメラ初期化
     if not remote_camera_ok:
@@ -328,7 +325,7 @@ async def _startup_services() -> None:
         logger.info("ℹ️ OctoPrint設定が未定義のため3Dプリンターサービスをスキップします")
 
     # ロボット（TEACHING）初期化
-    if not remote_robot_ok:
+    if not ROBOT_REMOTE_BASE_URL and not remote_robot_ok:
         try:
             robot_manager = TeachingRobotManager(
                 teaching_dir=ROBOT_TEACHING_DIR,
@@ -435,6 +432,17 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="自動組み立てロボット制御システム", lifespan=lifespan)
 
 
+@app.middleware("http")
+async def disable_browser_cache(request: Request, call_next):
+    response = await call_next(request)
+    path = request.url.path
+    if path == "/" or path.startswith("/static/"):
+        response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["Expires"] = "0"
+    return response
+
+
 @app.on_event("startup")
 async def on_startup() -> None:
     await _startup_services()
@@ -481,13 +489,24 @@ class RobotPointRegisterRequest(BaseModel):
 
 class RobotPointMoveRequest(BaseModel):
     point_no: int
-    speed_rate: float = 30.0
 
 
 class RobotIOOutputRequest(BaseModel):
     board_id: int
     port_no: int
     on: bool
+
+
+class RobotIOInputRequest(BaseModel):
+    board_id: int
+    port_no: int
+
+
+class RobotPositionUpdateRequest(BaseModel):
+    x: float
+    y: float
+    z: float
+    comment: str = ""
 
 
 # ルート
@@ -1000,9 +1019,9 @@ async def robot_point_move(request: RobotPointMoveRequest, raw_request: Request)
         await asyncio.to_thread(
             robot_manager.move_to_point,
             request.point_no,
-            request.speed_rate,
+            ROBOT_POINT_MOVE_SPEED_RATE,
         )
-        return {"status": "ok", "point_no": request.point_no, "speed_rate": request.speed_rate}
+        return {"status": "ok", "point_no": request.point_no, "speed_rate": ROBOT_POINT_MOVE_SPEED_RATE}
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
@@ -1012,7 +1031,21 @@ async def robot_point_move(request: RobotPointMoveRequest, raw_request: Request)
 
 @app.post("/api/robot/io/output")
 async def robot_io_output(request: RobotIOOutputRequest, raw_request: Request):
-    """CAN-IO出力"""
+    """CAN-IO出力 - robot_daemonにプロキシ"""
+    # まず robot_daemon へプロキシを試す
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                f"http://localhost:8081/api/robot/io/output",
+                json={"board_id": request.board_id, "port_no": request.port_no, "on": request.on},
+                timeout=aiohttp.ClientTimeout(total=5),
+            ) as resp:
+                if resp.status == 200:
+                    return await resp.json()
+    except Exception as e:
+        logger.warning(f"robot_daemon IO出力失敗、app.pyで処理試行: {e}")
+    
+    # robot_daemonが失敗した場合、app.pyの robot_manager を試す
     if await _check_remote_robot():
         proxied = await _proxy_robot_request(raw_request, "/api/robot/io/output")
         if proxied:
@@ -1029,6 +1062,101 @@ async def robot_io_output(request: RobotIOOutputRequest, raw_request: Request):
         return {"status": "ok", "result": result}
     except Exception as e:
         logger.error(f"IO出力エラー: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/robot/io/input")
+async def robot_io_input(request: RobotIOInputRequest, raw_request: Request):
+    """CAN-IO入力状態取得 - robot_daemonにプロキシ"""
+    # まず robot_daemon へプロキシを試す
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                f"http://localhost:8081/api/robot/io/input",
+                json={"board_id": request.board_id, "port_no": request.port_no},
+                timeout=aiohttp.ClientTimeout(total=5),
+            ) as resp:
+                if resp.status == 200:
+                    return await resp.json()
+    except Exception as e:
+        logger.warning(f"robot_daemon IO入力取得失敗、app.pyで処理試行: {e}")
+    
+    # robot_daemonが失敗した場合、app.pyの robot_manager を試す
+    if await _check_remote_robot():
+        proxied = await _proxy_robot_request(raw_request, "/api/robot/io/input")
+        if proxied:
+            return proxied
+    if not robot_manager:
+        raise HTTPException(status_code=503, detail="ロボットサービスが起動していません")
+    try:
+        result = await asyncio.to_thread(
+            robot_manager.io_input,
+            request.board_id,
+            request.port_no,
+        )
+        return {"status": "ok", "result": result}
+    except Exception as e:
+        logger.error(f"IO入力取得エラー: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/robot/position_table")
+async def robot_position_table_all(request: Request):
+    """ポジションテーブル全件取得"""
+    if await _check_remote_robot():
+        proxied = await _proxy_robot_request(request, "/api/robot/position_table")
+        if proxied:
+            return proxied
+    if not robot_manager:
+        raise HTTPException(status_code=503, detail="ロボットサービスが起動していません")
+    try:
+        return {"status": "ok", "data": robot_manager.get_position_table_all()}
+    except Exception as e:
+        logger.error(f"ポジションテーブル取得エラー: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/robot/position_table/{point_no}")
+async def robot_position_table_point(point_no: int, request: Request):
+    """ポジションテーブル取得"""
+    if await _check_remote_robot():
+        proxied = await _proxy_robot_request(request, f"/api/robot/position_table/{point_no}")
+        if proxied:
+            return proxied
+    if not robot_manager:
+        raise HTTPException(status_code=503, detail="ロボットサービスが起動していません")
+    try:
+        return {"status": "ok", "data": robot_manager.get_position_table_point(point_no)}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"ポジションテーブル取得エラー: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/robot/position_table/{point_no}")
+async def robot_position_table_update(point_no: int, request: RobotPositionUpdateRequest, raw_request: Request):
+    """ポジションテーブル更新"""
+    if await _check_remote_robot():
+        proxied = await _proxy_robot_request(raw_request, f"/api/robot/position_table/{point_no}")
+        if proxied:
+            return proxied
+    if not robot_manager:
+        raise HTTPException(status_code=503, detail="ロボットサービスが起動していません")
+    try:
+        data = await asyncio.to_thread(
+            robot_manager.update_position_table_point,
+            point_no,
+            request.x,
+            request.y,
+            request.z,
+            request.comment,
+        )
+        return {"status": "ok", "data": data}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"ポジションテーブル更新エラー: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -1227,18 +1355,6 @@ async def detect_bead(request: Request):
     except Exception as e:
         logger.error(f"ビーズ検出エラー: {e}")
         raise HTTPException(status_code=500, detail=str(e))
-
-# シグナルハンドラー
-def signal_handler(signum, frame):
-    """シグナルハンドラー（Ctrl+C対応）"""
-    logger.info("終了シグナルを受信しました")
-    import sys
-    sys.exit(0)
-
-
-signal.signal(signal.SIGINT, signal_handler)
-signal.signal(signal.SIGTERM, signal_handler)
-
 
 if __name__ == "__main__":
     import uvicorn
