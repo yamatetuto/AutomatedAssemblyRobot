@@ -169,8 +169,9 @@ sudo usermod -a -G video,dialout $USER
 cd ~/AutomatedAssemblyRobot
 # 起動
 scripts/start_robot_app.sh
+```
+```bash
 cd ~/AutomatedAssemblyRobot
-python app.py
 # 停止
 scripts/start_robot_app.sh
 ```
